@@ -33,6 +33,14 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _auth_email(path: Path) -> str:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        return str(payload.get("email") or "").strip()
+    except (OSError, ValueError, TypeError):
+        return ""
+
+
 def resolve_cpa_proxy(cfg: dict) -> str:
     """Resolve CPA outbound proxy, supporting an explicit direct mode."""
     configured = str(cfg.get("cpa_proxy") or "").strip()
@@ -125,10 +133,11 @@ def upload_cpa_auth_file_ssh(
         raise ValueError("CPA SSH chmod must be 600, 640, or 644")
 
     local_sha256 = _sha256_file(src)
+    account = _auth_email(src)
     remote_tmp = f"/tmp/.grok-sulfide-{uuid.uuid4().hex}-{src.name}"
     destination = remote_dir.rstrip("/") + "/" + src.name
     log(
-        f"[CPA][SSH][START] 正在上传 | 本地={src.name} | "
+        f"[CPA][SSH][START] 正在上传 | 账号={account or '(未知)'} | 本地={src.name} | "
         f"远端={host}:{destination}"
     )
     scp_target = f"{host}:{remote_tmp}"
@@ -177,7 +186,8 @@ def upload_cpa_auth_file_ssh(
             f"local={local_sha256[:12]} remote={remote_sha256[:12] or 'missing'}"
         )
     log(
-        f"[CPA][SSH][OK] 上传并校验成功 | 远端={host}:{destination} | "
+        f"[CPA][SSH][OK] 上传并校验成功 | 账号={account or '(未知)'} | "
+        f"远端={host}:{destination} | "
         f"SHA256={local_sha256[:12]}"
     )
     return {
@@ -197,10 +207,11 @@ def publish_cpa_auth_file(
     log = log_callback or (lambda m: print(m, flush=True))
     src = Path(auth_path).resolve()
     local_sha256 = _sha256_file(src)
+    account = _auth_email(src)
     result: dict[str, Any] = {"path": str(src), "sha256": local_sha256}
     states = {"hotload": "SKIP", "management": "SKIP", "ssh": "SKIP"}
     log(
-        f"[CPA][本地][OK] 凭据已生成 | 文件={src.name} | "
+        f"[CPA][本地][OK] 凭据已生成 | 账号={account or '(未知)'} | 文件={src.name} | "
         f"大小={src.stat().st_size}B | SHA256={local_sha256[:12]}"
     )
 

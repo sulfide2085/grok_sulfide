@@ -182,10 +182,18 @@ def mask_email(value: str) -> str:
     if "@" not in email:
         return "***"
     local, domain = email.rsplit("@", 1)
-    if len(local) <= 2:
-        masked = local[:1] + "*"
-    else:
-        masked = local[:2] + "*" * min(5, len(local) - 2)
+    primary, separator, alias = local.partition("+")
+
+    def mask_part(part: str) -> str:
+        if len(part) <= 2:
+            return part[:1] + "*"
+        if len(part) <= 4:
+            return part[:2] + "*" * (len(part) - 2)
+        return part[:2] + "***" + part[-2:]
+
+    masked = mask_part(primary)
+    if separator:
+        masked += "+" + mask_part(alias)
     return f"{masked}@{domain}"
 
 
