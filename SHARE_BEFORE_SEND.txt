@@ -1,0 +1,9 @@
+Before sharing this directory, remove:
+  config.json
+  mail_credentials.txt
+  accounts_cli.txt / accounts_*.txt
+  emails_used.txt / emails_error.txt
+  cpa_auths/*.json
+  cookies/ screenshots/ *.log
+
+The example files and source code are safe to keep.

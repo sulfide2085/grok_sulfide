@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>grok_sulfide</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/assets/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand-block">
+        <div class="brand-mark" aria-hidden="true">S</div>
+        <div>
+          <h1>grok_sulfide</h1>
+          <p>注册任务控制台</p>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <span id="configState" class="meta-state">配置检查中</span>
+        <span id="runState" class="status-badge idle"><span class="status-dot"></span>空闲</span>
+        <button id="refreshButton" class="icon-button" type="button" title="刷新" aria-label="刷新">↻</button>
+      </div>
+    </header>
+
+    <section class="metrics-band" aria-label="运行摘要">
+      <div class="metric-cell">
+        <span class="metric-label">账号</span>
+        <strong id="accountCount">0</strong>
+        <span id="accountsPath" class="metric-note">accounts_cli.txt</span>
+      </div>
+      <div class="metric-cell">
+        <span class="metric-label">CPA 凭据</span>
+        <strong id="cpaCount">0</strong>
+        <span id="cpaPath" class="metric-note">cpa_auths</span>
+      </div>
+      <div class="metric-cell">
+        <span class="metric-label">邮箱库存</span>
+        <strong id="mailCount">0</strong>
+        <span id="mailPath" class="metric-note">mail_credentials.txt</span>
+      </div>
+      <div class="metric-cell">
+        <span class="metric-label">当前进程</span>
+        <strong id="processId">—</strong>
+        <span id="runDuration" class="metric-note">未运行</span>
+      </div>
+    </section>
+
+    <main class="app-shell">
+      <aside class="control-column">
+        <div class="segmented-tabs" role="tablist" aria-label="控制视图">
+          <button class="tab-button active" type="button" role="tab" aria-selected="true" data-tab="run">运行</button>
+          <button class="tab-button" type="button" role="tab" aria-selected="false" data-tab="config">配置</button>
+        </div>
+
+        <section id="runPanel" class="tab-panel active" role="tabpanel">
+          <form id="runForm" autocomplete="off">
+            <label class="field">
+              <span>注册预设</span>
+              <select id="runPresetInput"></select>
+            </label>
+            <div id="presetSummary" class="preset-summary"></div>
+
+            <div id="aliasRunSection">
+              <label class="toggle-row standalone-toggle">
+                <span><strong>启用 Outlook 别名</strong></span>
+                <input id="aliasEnabledInput" type="checkbox" />
+              </label>
+              <label id="aliasLimitField" class="field">
+                <span>每个主邮箱的别名数量上限</span>
+                <input id="aliasLimitInput" type="number" min="1" max="1000" value="1" />
+              </label>
+              <section class="mail-inventory">
+                <div id="mailInventorySummary" class="mail-inventory-summary">库存计算中</div>
+                <div id="mailInventoryList" class="mail-inventory-list"></div>
+              </section>
+            </div>
+
+            <div class="field-group">
+              <span class="group-label">任务模式</span>
+              <div class="mode-switch" role="radiogroup" aria-label="任务模式">
+                <label><input type="radio" name="mode" value="extra" checked /><span>新增数量</span></label>
+                <label><input type="radio" name="mode" value="count" /><span>目标总数</span></label>
+              </div>
+            </div>
+
+            <label class="field">
+              <span id="amountLabel">新增数量</span>
+              <input id="amountInput" name="amount" type="number" min="1" max="10000" value="1" required />
+            </label>
+
+            <div class="field-row">
+              <label class="field">
+                <span>注册线程</span>
+                <input id="threadsInput" name="threads" type="number" min="1" max="10" value="1" required />
+              </label>
+              <label class="field">
+                <span>Mint 并发</span>
+                <select id="mintWorkersInput" name="mint_workers">
+                  <option value="-1">自动</option>
+                  <option value="0">内联</option>
+                  <option value="1">1</option>
+                  <option value="2">2</option>
+                  <option value="3">3</option>
+                  <option value="4">4</option>
+                  <option value="5">5</option>
+                  <option value="6">6</option>
+                  <option value="8">8</option>
+                  <option value="10">10</option>
+                </select>
+              </label>
+            </div>
+
+            <label class="field">
+              <span>账号文件</span>
+              <input id="accountsFileInput" name="accounts_file" type="text" value="accounts_cli.txt" spellcheck="false" />
+            </label>
+
+            <label class="field">
+              <span>浏览器回收间隔</span>
+              <input id="recycleInput" name="browser_recycle_every" type="number" min="1" max="1000" value="25" />
+            </label>
+
+            <div class="toggle-list">
+              <label class="toggle-row">
+                <span><strong>快速模式</strong><small>压缩等待并减少调试写入</small></span>
+                <input id="fastInput" type="checkbox" checked />
+              </label>
+              <label class="toggle-row">
+                <span><strong>浏览器复用</strong><small>同一线程连续复用 Chromium</small></span>
+                <input id="browserReuseInput" type="checkbox" checked />
+              </label>
+              <label class="toggle-row">
+                <span><strong>Cookie 快照</strong><small>成功后保存浏览器 Cookie</small></span>
+                <input id="cookieSnapshotInput" type="checkbox" />
+              </label>
+            </div>
+
+            <div id="readinessNotice" class="readiness-notice" hidden></div>
+
+            <div class="primary-actions">
+              <button id="startButton" class="button primary" type="submit">启动任务</button>
+              <button id="stopButton" class="button danger" type="button" disabled>停止</button>
+            </div>
+          </form>
+        </section>
+
+        <section id="configPanel" class="tab-panel" role="tabpanel" hidden>
+          <form id="configForm" autocomplete="off">
+            <div class="section-heading">
+              <h2>注册预设</h2>
+              <span id="mailboxState" class="section-state">—</span>
+            </div>
+            <label class="field">
+              <span>当前预设</span>
+              <select id="presetSelectConfig"></select>
+            </label>
+            <label class="field">
+              <span>预设名称</span>
+              <input id="presetNameConfig" type="text" maxlength="80" />
+            </label>
+            <div class="primary-actions">
+              <button id="newPresetButton" class="button" type="button">新建预设</button>
+              <button id="deletePresetButton" class="button danger" type="button">删除预设</button>
+            </div>
+
+            <div class="section-heading separated">
+              <h2>注册链路</h2>
+            </div>
+            <label class="field">
+              <span>注册方式</span>
+              <select id="registrationMethodConfig">
+                <option value="browser">浏览器</option>
+                <option value="protocol">grokcli-2api 协议</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>邮箱提供器</span>
+              <select id="emailProviderConfig">
+                <option value="outlook">Outlook / Hotmail</option>
+                <option value="moemail">MoeMail</option>
+                <option value="duckmail">DuckMail</option>
+                <option value="yyds">YYDS</option>
+                <option value="cloudflare">Cloudflare Mail</option>
+                <option value="cloudmail">CloudMail</option>
+              </select>
+            </label>
+
+            <div class="provider-fields provider-outlook-fields">
+              <label class="field">
+                <span>Outlook 凭据文件</span>
+                <input id="mailFileConfig" type="text" spellcheck="false" />
+              </label>
+            </div>
+
+            <div class="provider-fields provider-moemail-fields">
+            <label class="field">
+              <span>MoeMail 地址</span>
+              <input id="protocolMoeMailBaseConfig" type="url" spellcheck="false" />
+            </label>
+            <label class="field">
+              <span>MoeMail 域名</span>
+              <input id="protocolMoeMailDomainConfig" type="text" placeholder="留空自动探测" spellcheck="false" />
+            </label>
+            <label class="field">
+              <span>MoeMail API Key</span>
+              <input id="protocolMoeMailKeyConfig" type="password" placeholder="留空则保持现有值" autocomplete="new-password" />
+            </label>
+            </div>
+
+            <div class="provider-fields provider-duckmail-fields">
+              <label class="field"><span>DuckMail API Key</span><input id="duckmailKeyConfig" type="password" autocomplete="new-password" /></label>
+            </div>
+            <div class="provider-fields provider-yyds-fields">
+              <label class="field"><span>YYDS API Key</span><input id="yydsKeyConfig" type="password" autocomplete="new-password" /></label>
+              <label class="field"><span>YYDS JWT</span><input id="yydsJwtConfig" type="password" autocomplete="new-password" /></label>
+            </div>
+            <div class="provider-fields provider-cloudflare-fields">
+              <label class="field"><span>Cloudflare API 地址</span><input id="cloudflareBaseConfig" type="url" /></label>
+              <label class="field"><span>Cloudflare API Key</span><input id="cloudflareKeyConfig" type="password" autocomplete="new-password" /></label>
+            </div>
+            <div class="provider-fields provider-cloudmail-fields">
+              <label class="field"><span>CloudMail 地址</span><input id="cloudmailUrlConfig" type="url" /></label>
+              <label class="field"><span>CloudMail 管理邮箱</span><input id="cloudmailAdminConfig" type="email" /></label>
+              <label class="field"><span>CloudMail 密码</span><input id="cloudmailPasswordConfig" type="password" autocomplete="new-password" /></label>
+            </div>
+
+            <div class="protocol-only-fields">
+            <label class="field">
+              <span>YesCaptcha Key（可选）</span>
+              <input id="protocolYesCaptchaKeyConfig" type="password" placeholder="留空则保持现有值" autocomplete="new-password" />
+            </label>
+            <label class="field">
+              <span>协议代理</span>
+              <input id="protocolProxyConfig" type="text" placeholder="留空继承注册代理" spellcheck="false" />
+            </label>
+            <label class="check-line">
+              <input id="clearProtocolSecretsConfig" type="checkbox" />
+              <span>清除当前预设的邮箱与协议密钥</span>
+            </label>
+            </div>
+
+            <div class="section-heading separated">
+              <h2>网络</h2>
+            </div>
+
+            <label class="field">
+              <span>注册代理</span>
+              <input id="proxyConfig" type="text" spellcheck="false" />
+            </label>
+            <label class="field">
+              <span>邮箱代理</span>
+              <input id="emailProxyConfig" type="text" spellcheck="false" />
+            </label>
+            <label class="field">
+              <span>CPA 代理</span>
+              <input id="cpaProxyConfig" type="text" spellcheck="false" />
+            </label>
+
+            <div class="section-heading separated">
+              <h2>CPA / OIDC</h2>
+            </div>
+
+            <div class="toggle-list compact">
+              <label class="toggle-row">
+                <span><strong>生成 CPA 凭据</strong></span>
+                <input id="cpaExportConfig" type="checkbox" />
+              </label>
+              <label class="toggle-row">
+                <span><strong>有头浏览器</strong></span>
+                <input id="cpaHeadedConfig" type="checkbox" />
+              </label>
+              <label class="toggle-row">
+                <span><strong>远端上传</strong></span>
+                <input id="cpaUploadConfig" type="checkbox" />
+              </label>
+              <label class="toggle-row">
+                <span><strong>SSH 自动入池</strong></span>
+                <input id="cpaSshUploadConfig" type="checkbox" />
+              </label>
+            </div>
+
+            <label class="field">
+              <span>凭据目录</span>
+              <input id="cpaDirConfig" type="text" spellcheck="false" />
+            </label>
+            <label class="field">
+              <span>上游地址</span>
+              <input id="cpaBaseConfig" type="url" spellcheck="false" />
+            </label>
+            <label class="field">
+              <span>管理地址</span>
+              <input id="cpaManagementBaseConfig" type="url" spellcheck="false" />
+            </label>
+            <label class="field">
+              <span>管理密钥</span>
+              <input id="cpaManagementKeyConfig" type="password" placeholder="留空则保持现有值" autocomplete="new-password" />
+            </label>
+            <label class="check-line">
+              <input id="clearManagementKeyConfig" type="checkbox" />
+              <span>清除已保存的管理密钥</span>
+            </label>
+
+            <div class="field-row">
+              <label class="field">
+                <span>SSH 主机</span>
+                <input id="cpaSshHostConfig" type="text" spellcheck="false" />
+              </label>
+              <label class="field">
+                <span>文件权限</span>
+                <select id="cpaSshChmodConfig">
+                  <option value="600">600</option>
+                  <option value="640">640</option>
+                  <option value="644">644</option>
+                </select>
+              </label>
+            </div>
+            <label class="field">
+              <span>远端 CPA 目录</span>
+              <input id="cpaSshDirConfig" type="text" spellcheck="false" />
+            </label>
+
+            <button id="saveConfigButton" class="button primary full" type="submit">保存配置</button>
+          </form>
+        </section>
+      </aside>
+
+      <section class="workspace-column">
+        <section class="terminal-section">
+          <div class="workspace-toolbar">
+            <div>
+              <h2>实时日志</h2>
+              <span id="lastExitState" class="toolbar-note">等待任务</span>
+            </div>
+            <div class="toolbar-actions">
+              <label class="auto-scroll-control"><input id="autoScrollInput" type="checkbox" checked />自动滚动</label>
+              <button id="exportLogsButton" class="text-button" type="button">导出</button>
+              <button id="clearLogsButton" class="text-button" type="button">清空</button>
+            </div>
+          </div>
+          <div id="terminal" class="terminal" role="log" aria-live="polite" aria-label="注册任务日志">
+            <div class="terminal-empty">暂无日志</div>
+          </div>
+        </section>
+
+        <section class="accounts-section">
+          <div class="workspace-toolbar compact-toolbar">
+            <div>
+              <h2>最近账号</h2>
+              <span class="toolbar-note">仅显示脱敏邮箱</span>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>序号</th><th>邮箱</th><th>CPA</th></tr>
+              </thead>
+              <tbody id="accountsTableBody">
+                <tr><td colspan="3" class="empty-cell">暂无账号</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <div id="toastRegion" class="toast-region" aria-live="polite"></div>
+    <script src="/assets/app.js" defer></script>
+  </body>
+</html>

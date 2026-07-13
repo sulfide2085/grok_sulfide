@@ -1,0 +1,25 @@
+# secrets & runtime (delete these before sharing)
+config.json
+config.local.json
+.env
+mail_credentials.txt
+mail_credentials*.txt
+!mail_credentials.example.txt
+*_pool_import_report.json
+accounts_*.txt
+emails_used.txt
+emails_error.txt
+cpa_auths/
+cookies/
+screenshots/
+.playwright-cli/
+output/
+protocol_engine/**/sso_output/
+protocol_engine/**/cliproxyapi_auth/
+protocol_engine/**/accounts_output/
+*.log
+__pycache__/
+*.pyc
+.venv/
+dist/
+*.zip
