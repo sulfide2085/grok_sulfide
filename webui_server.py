@@ -598,7 +598,17 @@ def account_summary(path: Path, config: dict[str, Any], limit: int = 12) -> dict
     cpa = cpa_status(config)
     cpa_dir = ROOT / cpa["path"] if cpa["path"] != "outside project" else None
     if cpa_dir is not None and cpa_dir.exists():
-        cpa_names = {item.name.lower() for item in cpa_dir.glob("xai-*.json")}
+        cpa_names: set[str] = set()
+        cpa_emails: set[str] = set()
+        for item in cpa_dir.glob("xai-*.json"):
+            cpa_names.add(item.name.lower())
+            try:
+                payload = json.loads(item.read_text(encoding="utf-8"))
+                email = str(payload.get("email") or "").strip().lower()
+                if email:
+                    cpa_emails.add(email)
+            except (OSError, ValueError, TypeError):
+                pass
         if path.exists():
             try:
                 with path.open(encoding="utf-8-sig", errors="ignore") as handle:
@@ -608,7 +618,11 @@ def account_summary(path: Path, config: dict[str, Any], limit: int = 12) -> dict
                         if line.strip() and not line.lstrip().startswith("#")
                     ][-len(rows) :]
                 for row, email in zip(rows, emails):
-                    row["has_cpa"] = f"xai-{email}.json".lower() in cpa_names
+                    normalized = email.strip().lower()
+                    row["has_cpa"] = (
+                        normalized in cpa_emails
+                        or f"xai-{normalized}.json" in cpa_names
+                    )
             except OSError:
                 pass
     return {

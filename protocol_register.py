@@ -318,7 +318,6 @@ def register_one_protocol(
             raise RuntimeError("Turnstile sitekey was not discovered")
 
         solver = None
-        turnstile = ""
         if yescaptcha_key:
             solver = YesCaptchaSolver(
                 yescaptcha_key,
@@ -327,13 +326,6 @@ def register_one_protocol(
                 debug=False,
                 auto_fallback_endpoint=True,
             )
-            emit(f"[protocol #{index}] solving optional Turnstile")
-            try:
-                turnstile = _fresh_turnstile(solver, website_url, sitekey)
-            except Exception:  # noqa: BLE001
-                emit(f"[protocol #{index}] optional Turnstile solver failed; trying direct signup")
-                solver = None
-                turnstile = ""
         else:
             emit(f"[protocol #{index}] YesCaptcha not configured; trying direct signup")
         client.validate_password(email, password)
@@ -347,11 +339,19 @@ def register_one_protocol(
         for attempt in range(1, 3):
             if attempt > 1:
                 emit(f"[protocol #{index}] refreshing verification flight")
-                if solver is not None:
-                    turnstile = _fresh_turnstile(solver, website_url, sitekey)
                 client.create_email_validation_code(email)
                 code = receiver.wait_for_code(timeout=120)
             client.verify_email_validation_code(email, code)
+            turnstile = ""
+            if solver is not None:
+                emit(f"[protocol #{index}] solving signup Turnstile")
+                try:
+                    turnstile = _fresh_turnstile(solver, website_url, sitekey)
+                except Exception as exc:  # noqa: BLE001
+                    emit(
+                        f"[protocol #{index}] signup Turnstile unavailable; "
+                        f"trying direct create_account ({str(exc)[:120]})"
+                    )
             response = client.create_account(
                 email=email,
                 given_name="User",
@@ -388,58 +388,75 @@ def register_one_protocol(
             f"[protocol #{index}] post-signup cookie jar: "
             f"{_cookie_scope_summary(client) or ['none']}"
         )
-        if not sso:
+        sso_error = ""
+        if not sso and solver is not None:
             time.sleep(2.0)
             signin_url = "https://accounts.x.ai/sign-in?redirect=grok-com"
-            signin_turnstile = ""
-            if solver is not None:
+            emit(f"[protocol #{index}] solving sign-in Turnstile for SSO recovery")
+            try:
                 signin_turnstile = _fresh_turnstile(solver, signin_url, sitekey)
-            else:
-                emit(f"[protocol #{index}] trying direct password session without Turnstile")
-            sso = client.obtain_session_via_password(
-                email=email,
-                password=password,
-                turnstile_token=signin_turnstile,
-                referer=signin_url,
-                retries=4,
+                sso = client.obtain_session_via_password(
+                    email=email,
+                    password=password,
+                    turnstile_token=signin_turnstile,
+                    referer=signin_url,
+                    retries=4,
+                )
+                session_diag = client.session_diagnostics()
+                emit(f"[protocol #{index}] password-session diagnostics: {session_diag}")
+                if not sso:
+                    sso_error = str(
+                        session_diag.get("grpc_message")
+                        or "CreateSession completed without an SSO session"
+                    )
+            except Exception as exc:  # noqa: BLE001
+                sso_error = f"sign-in session recovery failed: {str(exc)[:180]}"
+                emit(f"[protocol #{index}] {sso_error}")
+        elif not sso:
+            sso_error = (
+                "signup response did not contain an authenticated session; "
+                "YesCaptcha is not configured for the sign-in recovery step"
             )
-            session_diag = client.session_diagnostics()
-            emit(f"[protocol #{index}] password-session diagnostics: {session_diag}")
+            emit(f"[protocol #{index}] {sso_error}")
         session_cookies = dict(extract_cookies_from_auth_client(client) or {})
         if sso:
             session_cookies["sso"] = sso
             session_cookies["sso-rw"] = sso
         else:
-            emit(f"[protocol #{index}] account created; SSO unavailable, continuing best-effort OAuth")
+            emit(f"[protocol #{index}] account created; SSO/CPA will remain pending backfill")
 
         cpa_path = None
         oauth_error = ""
-        try:
-            emit(f"[protocol #{index}] minting CPA OAuth")
-            oauth = complete_build_oauth(
-                email,
-                password,
-                cliproxyapi_auth_dir=auth_dir,
-                cliproxyapi_base_url=str(
-                    config.get("cpa_base_url") or "https://cli-chat-proxy.grok.com/v1"
-                ),
-                timeout=float(config.get("protocol_oauth_timeout_sec") or 180),
-                proxy=proxy,
-                interactive_fallback=False,
-                yescaptcha_key=yescaptcha_key,
-                protocol=True,
-                debug=False,
-                session_cookies=session_cookies,
-                auth_client=client,
-            )
-            candidate = Path(oauth.cliproxyapi_path).resolve() if oauth.cliproxyapi_path else None
-            if candidate and candidate.is_file():
-                cpa_path = candidate
-            else:
-                oauth_error = "OAuth completed without writing CPA auth JSON"
-        except Exception as exc:  # noqa: BLE001
-            oauth_error = str(exc)
-            emit(f"[protocol #{index}] CPA OAuth unavailable; account will be saved for backfill")
+        if not sso:
+            oauth_error = sso_error or "SSO unavailable; OAuth was not attempted"
+            emit(f"[protocol #{index}] skipping CPA OAuth until SSO is available")
+        else:
+            try:
+                emit(f"[protocol #{index}] minting CPA OAuth")
+                oauth = complete_build_oauth(
+                    email,
+                    password,
+                    cliproxyapi_auth_dir=auth_dir,
+                    cliproxyapi_base_url=str(
+                        config.get("cpa_base_url") or "https://cli-chat-proxy.grok.com/v1"
+                    ),
+                    timeout=float(config.get("protocol_oauth_timeout_sec") or 180),
+                    proxy=proxy,
+                    interactive_fallback=False,
+                    yescaptcha_key=yescaptcha_key,
+                    protocol=True,
+                    debug=False,
+                    session_cookies=session_cookies,
+                    auth_client=client,
+                )
+                candidate = Path(oauth.cliproxyapi_path).resolve() if oauth.cliproxyapi_path else None
+                if candidate and candidate.is_file():
+                    cpa_path = candidate
+                else:
+                    oauth_error = "OAuth completed without writing CPA auth JSON"
+            except Exception as exc:  # noqa: BLE001
+                oauth_error = str(exc)
+                emit(f"[protocol #{index}] CPA OAuth unavailable; account will be saved for backfill")
 
         result = {
             "ok": True,
@@ -448,6 +465,7 @@ def register_one_protocol(
             "sso": sso or "",
             "cpa_path": str(cpa_path) if cpa_path else "",
             "partial": not bool(sso and cpa_path),
+            "sso_error": sso_error,
             "oauth_error": oauth_error,
         }
         receiver.mark_used(password)

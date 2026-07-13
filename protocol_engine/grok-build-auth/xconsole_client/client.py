@@ -950,10 +950,10 @@ class XConsoleAuthClient:
 
         email_raw = (email or "").strip()
         password_n = password or ""
-        if not email_raw or not password_n:
+        if not email_raw or not password_n or not turnstile_token:
             self._last_session_diagnostics = {
                 "attempted": False,
-                "reason": "missing email or password",
+                "reason": "missing email, password, or Turnstile token",
                 "turnstile_supplied": bool(turnstile_token),
             }
             return None

@@ -133,5 +133,7 @@ Outlook 的别名开关和别名数量上限位于运行页，属于本次任务
 `protocol_yescaptcha_key` 是可选项。未配置时协议模式先直接创建账号；
 若当前 xAI 会话无法无验证码提取 SSO/CPA，账号仍会保存到
 `accounts_cli.txt`，并在 WebUI 中显示 CPA 待生成，之后可执行补提取。
+配置后，协议链会在邮箱校验完成后生成注册 Turnstile；若建号响应仍未附带
+SSO，则再生成一次登录 Turnstile，通过 `CreateSession` 恢复会话后执行 OAuth/CPA。
 
 完整运行说明见 [docs/REGISTER_PLAYBOOK.md](docs/REGISTER_PLAYBOOK.md)。
