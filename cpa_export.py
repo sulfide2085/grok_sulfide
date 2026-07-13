@@ -7,6 +7,7 @@ points at a directory that *contains* the `cpa_xai` package.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shlex
@@ -22,6 +23,14 @@ from typing import Any, Callable
 _REG_DIR = Path(__file__).resolve().parent
 _DEFAULT_OUT = _REG_DIR / "cpa_auths"
 _DEFAULT_CPA = Path("")  # empty = do not assume a machine-local CPA path
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def resolve_cpa_proxy(cfg: dict) -> str:
@@ -90,7 +99,7 @@ def upload_cpa_auth_file(
         payload = json.loads(raw) if raw else {}
     except json.JSONDecodeError:
         payload = {"response": raw[:300]}
-    log(f"[cpa] management upload -> {base} ({src.name})")
+    log(f"[CPA][管理API][OK] 上传成功 | 地址={base} | 文件={src.name}")
     return {"ok": True, "status": status, "response": payload}
 
 
@@ -115,7 +124,13 @@ def upload_cpa_auth_file_ssh(
     if mode not in {"600", "640", "644"}:
         raise ValueError("CPA SSH chmod must be 600, 640, or 644")
 
+    local_sha256 = _sha256_file(src)
     remote_tmp = f"/tmp/.grok-sulfide-{uuid.uuid4().hex}-{src.name}"
+    destination = remote_dir.rstrip("/") + "/" + src.name
+    log(
+        f"[CPA][SSH][START] 正在上传 | 本地={src.name} | "
+        f"远端={host}:{destination}"
+    )
     scp_target = f"{host}:{remote_tmp}"
     scp = subprocess.run(
         ["scp", "-q", "-o", "BatchMode=yes", "-o", f"ConnectTimeout={timeout}", str(src), scp_target],
@@ -129,10 +144,10 @@ def upload_cpa_auth_file_ssh(
     if scp.returncode != 0:
         raise RuntimeError(f"scp failed: {(scp.stderr or scp.stdout).strip()[:300]}")
 
-    destination = remote_dir.rstrip("/") + "/" + src.name
     command = (
         f"install -m {mode} -- {shlex.quote(remote_tmp)} {shlex.quote(destination)}"
         f" && rm -f -- {shlex.quote(remote_tmp)}"
+        f" && sha256sum -- {shlex.quote(destination)}"
     )
     try:
         ssh = subprocess.run(
@@ -155,8 +170,22 @@ def upload_cpa_auth_file_ssh(
         raise
     if ssh.returncode != 0:
         raise RuntimeError(f"ssh install failed: {(ssh.stderr or ssh.stdout).strip()[:300]}")
-    log(f"[cpa] SSH upload -> {host}:{remote_dir} ({src.name})")
-    return {"ok": True, "host": host, "remote_path": destination}
+    remote_sha256 = str(ssh.stdout or "").strip().split(maxsplit=1)[0].lower()
+    if remote_sha256 != local_sha256:
+        raise RuntimeError(
+            "SSH upload checksum mismatch: "
+            f"local={local_sha256[:12]} remote={remote_sha256[:12] or 'missing'}"
+        )
+    log(
+        f"[CPA][SSH][OK] 上传并校验成功 | 远端={host}:{destination} | "
+        f"SHA256={local_sha256[:12]}"
+    )
+    return {
+        "ok": True,
+        "host": host,
+        "remote_path": destination,
+        "sha256": local_sha256,
+    }
 
 
 def publish_cpa_auth_file(
@@ -167,7 +196,13 @@ def publish_cpa_auth_file(
     """Run all independently enabled CPA publication targets."""
     log = log_callback or (lambda m: print(m, flush=True))
     src = Path(auth_path).resolve()
-    result: dict[str, Any] = {"path": str(src)}
+    local_sha256 = _sha256_file(src)
+    result: dict[str, Any] = {"path": str(src), "sha256": local_sha256}
+    states = {"hotload": "SKIP", "management": "SKIP", "ssh": "SKIP"}
+    log(
+        f"[CPA][本地][OK] 凭据已生成 | 文件={src.name} | "
+        f"大小={src.stat().st_size}B | SHA256={local_sha256[:12]}"
+    )
 
     hotload_raw = str(config.get("cpa_hotload_dir") or "").strip()
     if config.get("cpa_copy_to_hotload", False) and hotload_raw:
@@ -180,24 +215,50 @@ def publish_cpa_auth_file(
             shutil.copy2(src, dst)
             os.chmod(dst, 0o600)
             result["cpa_path"] = str(dst)
-            log(f"[cpa] hotload copy -> {dst}")
+            states["hotload"] = "OK"
+            log(f"[CPA][热加载][OK] 已复制 | 目标={dst}")
         except Exception as exc:  # noqa: BLE001
             result["cpa_copy_error"] = str(exc)
-            log(f"[cpa] hotload copy failed: {exc}")
+            states["hotload"] = "FAIL"
+            log(f"[CPA][热加载][FAIL] 复制失败 | 原因={exc}")
 
     if config.get("cpa_management_upload_enabled", False):
-        try:
-            result["cpa_management_upload"] = upload_cpa_auth_file(src, config, log)
-        except Exception as exc:  # noqa: BLE001
-            result["cpa_management_upload_error"] = str(exc)
-            log(f"[cpa] management upload failed: {exc}")
+        management_base = str(config.get("cpa_management_base") or "").strip()
+        management_key = str(config.get("cpa_management_key") or "").strip()
+        if not management_base or not management_key:
+            reason = "地址或密钥未配置"
+            result["cpa_management_upload"] = {"ok": False, "skipped": True, "reason": reason}
+            log(f"[CPA][管理API][SKIP] {reason}，继续执行其他发布方式")
+        else:
+            log(f"[CPA][管理API][START] 正在上传 | 地址={management_base}")
+            try:
+                result["cpa_management_upload"] = upload_cpa_auth_file(src, config, log)
+                states["management"] = "OK"
+            except Exception as exc:  # noqa: BLE001
+                result["cpa_management_upload_error"] = str(exc)
+                states["management"] = "FAIL"
+                log(f"[CPA][管理API][FAIL] 上传失败 | 原因={exc}")
+    else:
+        log("[CPA][管理API][SKIP] 未启用")
 
     if config.get("cpa_ssh_upload_enabled", False):
         try:
             result["cpa_ssh_upload"] = upload_cpa_auth_file_ssh(src, config, log)
+            states["ssh"] = "OK"
         except Exception as exc:  # noqa: BLE001
             result["cpa_ssh_upload_error"] = str(exc)
-            log(f"[cpa] SSH upload failed: {exc}")
+            states["ssh"] = "FAIL"
+            log(f"[CPA][SSH][FAIL] 上传或校验失败 | 原因={exc}")
+    else:
+        log("[CPA][SSH][SKIP] 未启用")
+
+    remote_ok = states["management"] == "OK" or states["ssh"] == "OK"
+    any_failure = "FAIL" in states.values()
+    final = "OK" if remote_ok and not any_failure else "WARN" if remote_ok else "LOCAL_ONLY"
+    log(
+        f"[CPA][发布完成][{final}] 本地=OK | 管理API={states['management']} | "
+        f"SSH={states['ssh']} | 热加载={states['hotload']}"
+    )
     return result
 
 

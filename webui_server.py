@@ -213,6 +213,13 @@ class ProcessManager:
         clean = redact_log_text(text.rstrip("\r\n"))
         if not clean:
             return
+        if kind == "output" and clean.startswith("[CPA]"):
+            if "[FAIL]" in clean:
+                kind = "error"
+            elif "[OK]" in clean:
+                kind = "success"
+            elif "[START]" in clean or "[WARN]" in clean:
+                kind = "system"
         with self._lock:
             item = {
                 "id": self._next_log_id,
