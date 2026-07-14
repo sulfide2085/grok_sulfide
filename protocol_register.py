@@ -6,13 +6,14 @@ this module never imports code from sibling projects at runtime.
 
 from __future__ import annotations
 
+import hashlib
+import logging
 import os
 import re
 import secrets
 import sys
 import time
 import uuid
-import hashlib
 from pathlib import Path
 from typing import Any, Callable
 
@@ -22,6 +23,7 @@ import requests
 ROOT = Path(__file__).resolve().parent
 ENGINE_ROOT = ROOT / "protocol_engine" / "grok-build-auth"
 SIGNUP_URL = "https://accounts.x.ai/sign-up?redirect=grok-com"
+logger = logging.getLogger("grok_sulfide.protocol")
 
 
 def _load_engine() -> None:
@@ -50,7 +52,7 @@ def _infer_moemail_domain(base_url: str, api_key: str) -> str:
             if "@" in address:
                 return address.rsplit("@", 1)[1].strip()
     except Exception:
-        pass
+        logger.debug("MoeMail domain inference failed for %s", base_url, exc_info=True)
     return ""
 
 
@@ -97,7 +99,7 @@ class MoeMailReceiver:
                     if match and "x.ai" in text.lower():
                         return match.group(1).upper()
             except Exception:
-                pass
+                logger.debug("MoeMail poll failed for %s", self.email_id, exc_info=True)
             time.sleep(poll)
             poll = min(3.0, poll + 0.25)
         raise RuntimeError("timeout waiting for xAI email verification code")
@@ -234,6 +236,7 @@ def _cookie_scope_summary(client: Any) -> list[str]:
     try:
         metadata = client.cookie_metadata()
     except Exception:
+        logger.debug("cookie_metadata() unavailable", exc_info=True)
         metadata = []
     scopes: list[str] = []
     for item in metadata:
@@ -367,6 +370,7 @@ def register_one_protocol(
             try:
                 signup_error = str(client.extract_signup_error(body) or "")
             except Exception:
+                logger.debug("extract_signup_error failed", exc_info=True)
                 signup_error = ""
             status = int(getattr(response, "http_status", 0) or 0)
             if status == 200 and not signup_error:
@@ -482,7 +486,7 @@ def register_one_protocol(
             else:
                 receiver.release()
         except Exception:
-            pass
+            logger.debug("protocol failure cleanup failed", exc_info=True)
         raise
     finally:
         client.close()
