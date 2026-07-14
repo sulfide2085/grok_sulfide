@@ -11,11 +11,46 @@ from typing import Any, Callable
 
 logger = logging.getLogger("grok_sulfide.store")
 
-_ROOT = os.path.dirname(os.path.abspath(__file__))
+
+def _resolve_ledger_root() -> str:
+    """Prefer explicit GROK_LEDGER_ROOT, else package dir, with worktree-friendly fallback.
+
+    When running inside a git worktree that has no local emails_used.txt but the
+    main checkout does, reuse the main checkout ledger so historical used/error
+    state is not lost.
+    """
+    env = (os.environ.get("GROK_LEDGER_ROOT") or "").strip()
+    if env:
+        return os.path.abspath(env)
+
+    here = os.path.dirname(os.path.abspath(__file__))
+    local_used = os.path.join(here, "emails_used.txt")
+    if os.path.exists(local_used):
+        return here
+
+    # Common layout: <repo>/.claude/worktrees/<name>/...
+    parts = os.path.normpath(here).split(os.sep)
+    if ".claude" in parts and "worktrees" in parts:
+        try:
+            idx = parts.index(".claude")
+            main_root = os.sep.join(parts[:idx]) if idx > 0 else here
+            # On Windows drive parts may be like 'D:', join carefully
+            if os.name == "nt" and parts and parts[0].endswith(":"):
+                main_root = parts[0] + os.sep + os.sep.join(parts[1:idx])
+            candidate = os.path.join(main_root, "emails_used.txt")
+            if os.path.exists(candidate):
+                logger.info("ledger root fallback to main checkout: %s", main_root)
+                return main_root
+        except Exception:
+            logger.debug("ledger root fallback failed", exc_info=True)
+    return here
+
+
+_ROOT = _resolve_ledger_root()
 _EMAILS_USED_FILE = os.path.join(_ROOT, "emails_used.txt")
 _EMAILS_ERROR_FILE = os.path.join(_ROOT, "emails_error.txt")
 _ACCOUNTS_FILE = os.path.join(_ROOT, "accounts_cli.txt")
-_DB_PATH = os.path.join(_ROOT, "state.db")
+_DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "state.db")
 _email_track_lock = threading.Lock()
 # RLock: _upsert_usage/_conn both take the lock (schema init + writes).
 _db_lock = threading.RLock()

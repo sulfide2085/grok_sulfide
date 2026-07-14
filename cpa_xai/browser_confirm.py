@@ -22,10 +22,7 @@ Hard rules:
 
 from __future__ import annotations
 
-logger = logging.getLogger("grok_sulfide.cpa.browser_confirm")
-
 import logging
-
 import os
 import re
 import sys
@@ -34,6 +31,8 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlparse
+
+logger = logging.getLogger("grok_sulfide.cpa.browser_confirm")
 
 LogFn = Callable[[str], None]
 

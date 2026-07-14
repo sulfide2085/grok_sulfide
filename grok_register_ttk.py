@@ -55,6 +55,7 @@ from browser import (
     sync_active_page,
     refresh_active_page,
 )
+from tab_pool import TabPool
 from proxy_bridge import (
     cleanup_proxy_bridges as _cleanup_proxy_bridges,
     start_authenticated_proxy_bridge as _start_authenticated_proxy_bridge,
@@ -1123,8 +1124,8 @@ def open_signup_page(log_callback=None, cancel_callback=None):
         if log_callback:
             log_callback(f"[Debug] 打开URL异常: {e}")
         try:
-            TabPool.release_tab()
-            page = _get_page()
+            stop_browser()
+            browser, page = start_browser()
             page.get(SIGNUP_URL)
         except Exception as e2:
             if log_callback:

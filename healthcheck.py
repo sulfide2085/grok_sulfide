@@ -52,8 +52,11 @@ def check_signup_reachable(
         raise HealthCheckError(f"signup page HTTP {status}")
 
     lower = body.lower()
-    markers = ("x.ai", "sign", "email", "grok", "accounts")
-    if not any(m in lower for m in markers):
+    # Next.js signup often ships a large shell with few plaintext markers in the
+    # first chunk; accept either semantic markers or a normal HTML document.
+    markers = ("x.ai", "sign", "email", "grok", "accounts", "turnstile", "inter_")
+    html_ok = "<!doctype html" in lower or "<html" in lower
+    if not (html_ok or any(m in lower for m in markers)):
         raise HealthCheckError("signup page body missing expected markers (possible DOM/block change)")
 
     return {"ok": True, "status": status, "bytes": len(body), "url": SIGNUP_URL}

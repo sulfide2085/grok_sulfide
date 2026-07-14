@@ -188,7 +188,7 @@ def _ensure_browser(worker_id: int, force_recycle: bool = False):
             reg.stop_browser()
         except Exception:
             logger.debug("suppressed exception", exc_info=True)
-    if reg.TabPool.get_browser() is None:
+    if reg._get_browser() is None:
         reg.start_browser(log_callback=lambda m: log(worker_id, m))
 
 
@@ -810,7 +810,9 @@ def main() -> int:
     log_thread.start()
 
     try:
-        reg.TabPool.init(reg.create_browser_options, log_callback=lambda m: log(0, m))
+        from tab_pool import TabPool
+
+        TabPool.init(reg.create_browser_options, log_callback=lambda m: log(0, m))
     except Exception as exc:
         print(f"[!] 浏览器初始化失败: {exc}", flush=True)
         return 1

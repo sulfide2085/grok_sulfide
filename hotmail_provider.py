@@ -7,11 +7,8 @@ registrar project or duplicating the browser registration flow.
 
 from __future__ import annotations
 
-logger = logging.getLogger("grok_sulfide.hotmail")
-
-import logging
-
 import email
+import logging
 import html
 import imaplib
 import os
@@ -23,6 +20,8 @@ import time
 from datetime import timezone
 from email.header import decode_header, make_header
 from email.utils import parsedate_to_datetime
+
+logger = logging.getLogger("grok_sulfide.hotmail")
 from typing import Any, Callable
 
 
