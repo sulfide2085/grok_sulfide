@@ -19,6 +19,8 @@ protocol_engine/**/cliproxyapi_auth/
 protocol_engine/**/accounts_output/
 *.log
 logs/
+state.db
+state.db-*
 __pycache__/
 *.pyc
 .venv/

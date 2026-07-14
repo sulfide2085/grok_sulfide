@@ -26,6 +26,9 @@ from typing import Any
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import grok_register_ttk as reg  # noqa: E402
+from failure_classify import FailureStats  # noqa: E402
+
+_failure_stats = FailureStats()
 
 
 # Linux 适配: DrissionPage 默认找 'chrome', 我们装的是 chromium
@@ -419,7 +422,8 @@ def register_one(
         _inc("reg_success")
         return job
     except Exception as exc:
-        log(worker_id, f"! 注册失败: {exc}")
+        cls = _failure_stats.record(exc)
+        log(worker_id, f"! 注册失败 [{cls.value}]: {exc}")
         reg.mark_error(email or "", reason=str(exc)[:120])
         traceback.print_exc()
         _inc("reg_fail")
@@ -616,7 +620,8 @@ def _run_protocol_registration(
                     log("P", f"+ protocol registration complete #{index}: {result['email']}{suffix}")
                 except Exception as exc:  # noqa: BLE001
                     failed += 1
-                    log("P", f"! protocol registration failed #{index}: {exc}")
+                    cls = _failure_stats.record(exc)
+                    log("P", f"! protocol registration failed [{cls.value}] #{index}: {exc}")
                     traceback.print_exc()
     except KeyboardInterrupt:
         print("\n[!] 用户中断", flush=True)
@@ -625,6 +630,8 @@ def _run_protocol_registration(
         _log_queue.put(None)
         log_thread.join(timeout=2)
     print(f"=== 完成: 协议注册成功 {success}, 失败 {failed} ===", flush=True)
+    if failed:
+        print(f"=== 失败分类: {_failure_stats.summary()} ===", flush=True)
     return 0 if failed == 0 else 1
 
 
@@ -860,6 +867,8 @@ def main() -> int:
         f"CPA跳过 {s.get('mint_skip', 0)} ===",
         flush=True,
     )
+    if s.get("reg_fail", 0):
+        print(f"=== 失败分类: {_failure_stats.summary()} ===", flush=True)
     return 0 if s.get("reg_success", 0) > 0 else 1
 
 
