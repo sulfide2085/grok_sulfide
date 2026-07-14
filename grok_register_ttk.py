@@ -3158,6 +3158,10 @@ class GrokRegisterGUI:
             raise
         password = profile.get("password", "") or ""
         mark_used(email, password)
+        try:
+            _store.record_account(email, password, sso)
+        except Exception:
+            logger.debug("record_account failed", exc_info=True)
         with self.stats_lock:
             self.results.append({"email": email, "sso": sso, "profile": profile})
             self.success_count += 1

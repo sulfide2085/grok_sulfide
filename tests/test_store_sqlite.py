@@ -54,6 +54,24 @@ def test_concurrent_mark_used(tmp_path, monkeypatch):
         assert store.is_email_used(f"user{i}@ex.com")
 
 
+def test_record_account_upsert(tmp_path, monkeypatch):
+    db = tmp_path / "state.db"
+    monkeypatch.setattr(store, "_DB_PATH", str(db))
+    monkeypatch.setattr(store, "_db_initialized", False)
+    monkeypatch.setattr(store, "DUAL_WRITE_TEXT", False)
+
+    store.record_account("a@x.com", "pw", "sso1")
+    store.record_account("a@x.com", "pw2", "sso2")
+    found = store.collect_local_consumed_emails({})
+    assert "a@x.com" in found
+    import sqlite3
+
+    conn = sqlite3.connect(db)
+    row = conn.execute("SELECT password, sso FROM accounts WHERE email=?", ("a@x.com",)).fetchone()
+    conn.close()
+    assert row == ("pw2", "sso2")
+
+
 def test_migrate_text_into_sqlite(tmp_path, monkeypatch):
     used = tmp_path / "emails_used.txt"
     err = tmp_path / "emails_error.txt"

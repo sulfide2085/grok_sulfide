@@ -366,6 +366,12 @@ def register_one(
             f.write(line)
         log(worker_id, f"+ 注册成功: {email}")
         reg.mark_used(email, password)
+        try:
+            import store as _store
+
+            _store.record_account(email, password, sso)
+        except Exception:
+            logger.debug("record_account failed", exc_info=True)
 
         # Capture cookies BEFORE releasing browser (for mint cookie inject)
         page = reg._get_page()

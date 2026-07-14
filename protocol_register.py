@@ -473,6 +473,13 @@ def register_one_protocol(
             "oauth_error": oauth_error,
         }
         receiver.mark_used(password)
+        if sso:
+            try:
+                import store as _store
+
+                _store.record_account(email, password, sso)
+            except Exception:
+                logger.debug("record_account failed", exc_info=True)
         return result
     except Exception as exc:
         try:
