@@ -687,6 +687,11 @@ def main() -> int:
     parser.add_argument("--browser-recycle-every", type=int, default=25, help="复用 N 次后完整回收")
     parser.add_argument("--cookie-snapshot", action="store_true", help="注册成功写 cookie 快照（默认关，fast）")
     parser.add_argument("--inline-mint", action="store_true", help="强制注册线程内联 mint（调试用）")
+    parser.add_argument(
+        "--skip-preflight",
+        action="store_true",
+        help="跳过开跑前健康探针（邮箱配置/注册页可达性）",
+    )
     args = parser.parse_args()
 
     reg.load_config()
@@ -706,6 +711,20 @@ def main() -> int:
     registration_method = str(
         args.registration_method or cfg0.get("registration_method") or "browser"
     ).strip().lower()
+    if not args.skip_preflight:
+        try:
+            from healthcheck import HealthCheckError, run_preflight
+
+            print("[*] preflight: running health checks...", flush=True)
+            results = run_preflight(cfg0)
+            for item in results:
+                print(f"[*] preflight ok: {item}", flush=True)
+        except HealthCheckError as exc:
+            print(f"[!] preflight failed: {exc}", flush=True)
+            return 3
+        except Exception as exc:
+            print(f"[!] preflight unexpected error: {exc}", flush=True)
+            return 3
     threads = max(1, min(args.threads, 10))
     fast = bool(args.fast) and not bool(args.no_fast)
 
