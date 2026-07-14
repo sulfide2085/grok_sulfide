@@ -39,8 +39,10 @@ from providers.common import generate_username as _providers_generate_username
 
 import browser as _browser_mod
 from browser import (
+    BrowserSession,
     CHROMIUM_SLIM_FLAGS,
     create_browser_options,
+    current_session,
     get_browser as _get_browser,
     set_browser as _set_browser,
     get_page as _get_page,

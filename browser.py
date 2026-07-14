@@ -1,8 +1,19 @@
-"""Browser lifecycle helpers (TabPool wrappers + Chromium options)."""
+"""Browser lifecycle helpers (TabPool wrappers + Chromium options).
+
+Concurrency contract
+--------------------
+- One Chromium process per worker thread (see ``tab_pool.TabPool``).
+- ``BrowserSession`` is a thin object facade over that thread-local pool.
+- Registration fill_* helpers still accept an optional page; when omitted they
+  read the current thread session via ``get_page()``. Multi-thread browser
+  registration is supported only as multi-session (one thread → one session).
+- CPA mint uses its own standalone browsers in ``cpa_xai.browser_confirm``.
+"""
 from __future__ import annotations
 
 import logging
 import os
+from dataclasses import dataclass
 from typing import Any, Callable
 from urllib.parse import urlparse
 
@@ -86,6 +97,60 @@ def create_browser_options(proxy_override: Any = _BROWSER_PROXY_UNSET):
         except Exception as e:
             print(f"  [proxy] set browser proxy failed: {e}")
     return options
+
+
+@dataclass
+class BrowserSession:
+    """Object facade over the current thread's TabPool Chromium.
+
+    Methods mutate the thread-local browser; construct one session per worker
+    thread and do not share a session across threads.
+    """
+
+    log_callback: Callable[[str], None] | None = None
+
+    @property
+    def browser(self) -> Any:
+        return TabPool.get_browser()
+
+    @property
+    def page(self) -> Any:
+        if TabPool.get_browser() is None:
+            return None
+        return TabPool.get_tab()
+
+    @property
+    def served(self) -> int:
+        return TabPool.served_count()
+
+    def start(self) -> tuple[Any, Any]:
+        return start_browser(log_callback=self.log_callback)
+
+    def stop(self) -> None:
+        stop_browser()
+
+    def restart(self) -> tuple[Any, Any]:
+        return restart_browser(log_callback=self.log_callback)
+
+    def prepare_next(self, *, force_recycle: bool = False) -> tuple[Any, Any]:
+        return prepare_browser_for_next_account(
+            log_callback=self.log_callback,
+            force_recycle=force_recycle,
+        )
+
+    def sync(self) -> Any:
+        return sync_active_page()
+
+    def refresh(self) -> Any:
+        return refresh_active_page()
+
+    def clear_session(self) -> bool:
+        return TabPool.clear_session(log_callback=self.log_callback)
+
+
+def current_session(log_callback: Callable[[str], None] | None = None) -> BrowserSession:
+    """Return a session bound to the current thread's TabPool state."""
+    return BrowserSession(log_callback=log_callback)
 
 
 def get_browser():

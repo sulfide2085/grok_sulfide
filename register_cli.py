@@ -5,8 +5,9 @@ Architecture:
   Mint workers (M)      →  cpa_auths/xai-*.json + optional hotload
 
 Browser lifecycle:
-  - One Chromium per register worker, reused via TabPool.clear_session
-  - Full recycle every N accounts or on error
+  - One Chromium per register worker thread (browser.BrowserSession / TabPool)
+  - Sessions are not shared across threads; multi-thread = multi-session
+  - Reuse via TabPool.clear_session; full recycle every N accounts or on error
   - Register browser released BEFORE mint (mint always standalone Chromium)
   - Peak browsers ≈ R + M (not 2×R)
 """
