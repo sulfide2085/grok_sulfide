@@ -6,7 +6,7 @@ Grok 注册机 - TTK GUI 版本
 """
 
 import tkinter as tk
-from tkinter import ttk, messagebox, scrolledtext
+from tkinter import ttk, scrolledtext
 import atexit
 import base64
 import threading
@@ -25,7 +25,7 @@ import re
 import string
 import json
 
-from DrissionPage import Chromium, ChromiumOptions
+from DrissionPage import ChromiumOptions
 from DrissionPage.errors import PageDisconnectedError
 from curl_cffi import requests
 
@@ -2768,6 +2768,93 @@ return '';
         return ""
 
 
+
+def _fill_otp_via_drission(page, clean_code, log_callback=None):
+    """Prefer real keystrokes so React OTP state updates (JS-only often fakes success)."""
+    if page is None or not clean_code:
+        return ""
+    selectors = [
+        'css:input[data-input-otp="true"]',
+        'css:input[autocomplete="one-time-code"]',
+        'css:input[name="code"]',
+        'css:input[inputmode="numeric"]',
+        'xpath://input[@maxlength="1"]',
+    ]
+    try:
+        # single aggregate field
+        for sel in selectors[:4]:
+            try:
+                ele = page.ele(sel, timeout=0.6)
+            except Exception:
+                ele = None
+            if not ele:
+                continue
+            try:
+                ml = int(ele.attr("maxlength") or 0)
+            except Exception:
+                ml = 0
+            if ml == 1:
+                continue
+            try:
+                ele.clear()
+            except Exception:
+                pass
+            try:
+                ele.click()
+            except Exception:
+                pass
+            try:
+                ele.input(clean_code, clear=True)
+            except TypeError:
+                ele.input(clean_code)
+            try:
+                page.actions.key_down("ENTER").key_up("ENTER")
+            except Exception:
+                try:
+                    ele.input("\n")
+                except Exception:
+                    pass
+            val = str(ele.value or ele.attr("value") or "").replace(" ", "").strip()
+            if val and (clean_code in val or val in clean_code or len(val) >= min(4, len(clean_code))):
+                if log_callback:
+                    log_callback(f"[*] Drission 写入验证码: aggregate value={val[:8]}")
+                return "dp-aggregate"
+        # multi-box OTP
+        boxes = []
+        try:
+            boxes = page.eles('css:input[maxlength="1"]', timeout=0.8) or []
+        except Exception:
+            boxes = []
+        boxes = [b for b in boxes if b]
+        if len(boxes) >= len(clean_code):
+            for i, ch in enumerate(clean_code):
+                box = boxes[i]
+                try:
+                    box.click()
+                except Exception:
+                    pass
+                try:
+                    box.clear()
+                except Exception:
+                    pass
+                try:
+                    box.input(ch, clear=True)
+                except TypeError:
+                    box.input(ch)
+            try:
+                boxes[min(len(clean_code), len(boxes)) - 1].input("\n")
+            except Exception:
+                pass
+            if log_callback:
+                log_callback(f"[*] Drission 写入验证码: {len(clean_code)} boxes")
+            return "dp-boxes"
+    except Exception as exc:
+        if log_callback:
+            log_callback(f"[Debug] Drission OTP 填写异常: {exc}")
+    return ""
+
+
+
 def fill_code_and_submit(email, dev_token, timeout=180, log_callback=None, cancel_callback=None):
     page = _get_page()
     check_timeout(time.time())
@@ -2830,8 +2917,15 @@ return false;
             raise Exception(f"验证码阶段页面回到注册方式页: {email}")
         if page_still_on_email_form(page) and not page_has_code_input(page):
             raise Exception(f"验证码阶段退回邮箱表单: {email}")
+        if not page_has_code_input(page):
+            human_sleep(0.5, cancel_callback)
+            continue
 
-        filled = page.run_js(
+        # 1) real keystrokes first (ported from gui hardening)
+        filled = _fill_otp_via_drission(page, clean_code, log_callback=log_callback)
+        # 2) JS fallback for stubborn React OTP widgets
+        if not filled:
+            filled = page.run_js(
             """
 const code = String(arguments[0] || '').trim();
 if (!code) return 'empty-code';
