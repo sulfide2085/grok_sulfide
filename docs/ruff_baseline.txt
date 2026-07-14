@@ -1,0 +1,60 @@
+cpa_xai\browser_confirm.py:32:26: F401 [*] `urllib.parse.urlparse` imported but unused
+grok_register_gui.py:9:26: F401 [*] `tkinter.messagebox` imported but unused
+grok_register_gui.py:28:26: F401 [*] `DrissionPage.Chromium` imported but unused
+grok_register_gui.py:775:9: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+grok_register_gui.py:1269:9: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+grok_register_gui.py:1643:9: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+grok_register_gui.py:1774:17: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+grok_register_gui.py:1779:17: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+grok_register_gui.py:1788:17: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+grok_register_gui.py:2144:1: E402 Module level import not at top of file
+grok_register_gui.py:3552:5: F811 Redefinition of unused `generate_random_birthdate` from line 2034: `generate_random_birthdate` redefined here
+grok_register_gui.py:3563:5: F811 Redefinition of unused `set_birth_date` from line 2045: `set_birth_date` redefined here
+grok_register_gui.py:3585:5: F811 Redefinition of unused `set_tos_accepted` from line 2066: `set_tos_accepted` redefined here
+grok_register_gui.py:3610:5: F811 Redefinition of unused `encode_grpc_nsfw_settings` from line 2088: `encode_grpc_nsfw_settings` redefined here
+grok_register_gui.py:3621:5: F811 Redefinition of unused `update_nsfw_settings` from line 2098: `update_nsfw_settings` redefined here
+grok_register_gui.py:4609:9: E731 Do not assign a `lambda` expression, use a `def`
+grok_register_gui.py:4634:25: B012 `break` inside `finally` blocks cause exceptions to be silenced
+grok_register_gui.py:4668:5: F841 Local variable `app` is assigned to but never used
+grok_register_ttk.py:9:26: F401 [*] `tkinter.messagebox` imported but unused
+grok_register_ttk.py:28:26: F401 [*] `DrissionPage.Chromium` imported but unused
+grok_register_ttk.py:779:9: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+grok_register_ttk.py:1273:9: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+grok_register_ttk.py:1647:9: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+grok_register_ttk.py:1778:17: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+grok_register_ttk.py:1783:17: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+grok_register_ttk.py:1792:17: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+grok_register_ttk.py:2148:1: E402 Module level import not at top of file
+grok_register_ttk.py:3453:5: F811 Redefinition of unused `generate_random_birthdate` from line 2038: `generate_random_birthdate` redefined here
+grok_register_ttk.py:3464:5: F811 Redefinition of unused `set_birth_date` from line 2049: `set_birth_date` redefined here
+grok_register_ttk.py:3486:5: F811 Redefinition of unused `set_tos_accepted` from line 2070: `set_tos_accepted` redefined here
+grok_register_ttk.py:3511:5: F811 Redefinition of unused `encode_grpc_nsfw_settings` from line 2092: `encode_grpc_nsfw_settings` redefined here
+grok_register_ttk.py:3522:5: F811 Redefinition of unused `update_nsfw_settings` from line 2102: `update_nsfw_settings` redefined here
+grok_register_ttk.py:4501:9: E731 Do not assign a `lambda` expression, use a `def`
+grok_register_ttk.py:4523:25: B012 `break` inside `finally` blocks cause exceptions to be silenced
+grok_register_ttk.py:4555:5: F841 Local variable `app` is assigned to but never used
+hotmail_provider.py:48:1: E731 Do not assign a `lambda` expression, use a `def`
+hotmail_provider.py:51:1: E731 Do not assign a `lambda` expression, use a `def`
+hotmail_provider.py:52:1: E731 Do not assign a `lambda` expression, use a `def`
+hotmail_provider.py:248:9: F841 Local variable `max_aliases` is assigned to but never used
+protocol_engine\grok-build-auth\alias_mail\alias_mail.py:18:8: F401 [*] `email` imported but unused
+protocol_engine\grok-build-auth\alias_mail\alias_mail.py:25:8: F401 [*] `string` imported but unused
+protocol_engine\grok-build-auth\alias_mail\alias_mail.py:134:13: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+protocol_engine\grok-build-auth\alias_mail\alias_mail.py:192:5: F841 Local variable `num` is assigned to but never used
+protocol_engine\grok-build-auth\run.py:43:1: E402 Module level import not at top of file
+protocol_engine\grok-build-auth\run.py:44:1: E402 Module level import not at top of file
+protocol_engine\grok-build-auth\run.py:49:1: E402 Module level import not at top of file
+protocol_engine\grok-build-auth\run.py:367:5: F841 Local variable `ok_build` is assigned to but never used
+protocol_engine\grok-build-auth\xconsole_client\client.py:750:41: F821 Undefined name `hard_fail`
+protocol_engine\grok-build-auth\xconsole_client\grpcweb.py:114:34: E702 Multiple statements on one line (semicolon)
+protocol_engine\grok-build-auth\xconsole_client\grpcweb.py:120:35: E702 Multiple statements on one line (semicolon)
+protocol_engine\grok-build-auth\xconsole_client\grpcweb.py:130:34: E702 Multiple statements on one line (semicolon)
+protocol_engine\grok-build-auth\xconsole_client\oauth_protocol.py:34:5: F401 [*] `.xai_oauth.AUTHORIZATION_ENDPOINT` imported but unused
+protocol_engine\grok-build-auth\xconsole_client\oauth_protocol.py:39:5: F401 [*] `.xai_oauth.TOKEN_ENDPOINT` imported but unused
+protocol_engine\grok-build-auth\xconsole_client\solver.py:129:17: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+protocol_engine\grok-build-auth\xconsole_client\sso.py:34:8: F401 [*] `os` imported but unused
+protocol_engine\grok-build-auth\xconsole_client\tempmail_transport.py:25:20: F401 [*] `typing.List` imported but unused
+protocol_engine\grok-build-auth\xconsole_client\xai_oauth.py:31:31: F401 [*] `typing.List` imported but unused
+webui_server.py:635:35: B905 `zip()` without an explicit `strict=` parameter
+Found 58 errors.
+[*] 12 fixable with the `--fix` option (11 hidden fixes can be enabled with the `--unsafe-fixes` option).

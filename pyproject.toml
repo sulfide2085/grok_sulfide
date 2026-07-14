@@ -4,9 +4,31 @@ version = "1.0.0"
 description = "Grok registrar with Outlook mailbox support and CPA/OIDC export"
 requires-python = ">=3.12,<3.14"
 dependencies = [
-    "DrissionPage>=4.1",
-    "curl_cffi>=0.7",
+    "DrissionPage>=4.1,<5",
+    "curl_cffi>=0.7,<1",
+    "requests>=2.31,<3",
+    "python-dotenv>=1.0,<2",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.8",
+    "pytest>=8.0",
 ]
 
 [tool.uv]
 package = false
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+extend-exclude = [".venv", "protocol_engine/**/__pycache__", "**/*_output"]
+
+[tool.ruff.lint]
+# F811=duplicate defs F841=unused vars F401=unused imports E722=bare except B=bugbear
+select = ["F", "E4", "E7", "E722", "B"]
+ignore = ["E741"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
