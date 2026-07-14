@@ -35,6 +35,12 @@ SECRET_LOG_PATTERN = re.compile(
 )
 LONG_HEX_SECRET_PATTERN = re.compile(r"\b[A-Fa-f0-9]{24,}\b")
 
+# Loopback token + Host validation (DNS-rebinding / open-bind hardening).
+WEBUI_TOKEN = ""
+WEBUI_HOST = "127.0.0.1"
+WEBUI_PORT = 8765
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "[::1]"})
+
 STATIC_ROUTES = {
     "/": WEB_ROOT / "index.html",
     "/index.html": WEB_ROOT / "index.html",
@@ -880,6 +886,10 @@ class WebUIHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
+        ok, reason = _authorize(self)
+        if not ok:
+            self._send_error_json(HTTPStatus.FORBIDDEN, reason)
+            return
         try:
             if parsed.path in STATIC_ROUTES:
                 self._serve_static(STATIC_ROUTES[parsed.path])
@@ -926,6 +936,10 @@ class WebUIHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
+        ok, reason = _authorize(self)
+        if not ok:
+            self._send_error_json(HTTPStatus.FORBIDDEN, reason)
+            return
         if self.headers.get("X-Grok-WebUI") != "1":
             self._send_error_json(HTTPStatus.FORBIDDEN, "Missing WebUI request header")
             return
@@ -964,18 +978,98 @@ def create_server(host: str, port: int) -> tuple[ThreadingHTTPServer, int]:
     raise OSError(f"Could not bind ports {port}-{port + 19}: {last_error}")
 
 
+def _host_is_allowed(host_header: str) -> bool:
+    raw = (host_header or "").strip().lower()
+    if not raw:
+        return False
+    # Strip port: "127.0.0.1:8765" / "[::1]:8765"
+    if raw.startswith("["):
+        host_only = raw.split("]", 1)[0] + "]"
+    else:
+        host_only = raw.rsplit(":", 1)[0]
+    if host_only in _LOOPBACK_HOSTS:
+        return True
+    # Allow the exact bind host when non-loopback was intentionally chosen.
+    bind = (WEBUI_HOST or "").strip().lower()
+    return bool(bind) and host_only == bind
+
+
+def _token_from_request(handler: BaseHTTPRequestHandler) -> str:
+    header = handler.headers.get("X-Grok-WebUI-Token") or handler.headers.get("X-WebUI-Token") or ""
+    if header.strip():
+        return header.strip()
+    parsed = urlparse(handler.path)
+    qs = parse_qs(parsed.query)
+    for key in ("token", "access_token"):
+        vals = qs.get(key) or []
+        if vals and str(vals[0]).strip():
+            return str(vals[0]).strip()
+    return ""
+
+
+def _authorize(handler: BaseHTTPRequestHandler) -> tuple[bool, str]:
+    if not _host_is_allowed(handler.headers.get("Host", "")):
+        return False, "Invalid Host header"
+    if not WEBUI_TOKEN:
+        return True, ""
+    # Static assets are allowed without token once Host is valid (token is injected into HTML).
+    path = urlparse(handler.path).path
+    if path in STATIC_ROUTES or path.startswith("/assets/"):
+        return True, ""
+    provided = _token_from_request(handler)
+    if provided != WEBUI_TOKEN:
+        return False, "Missing or invalid WebUI token"
+    return True, ""
+
+
 def main() -> int:
+    try:
+        import logging_setup
+
+        logging_setup.init()
+    except Exception:
+        pass
+
     parser = argparse.ArgumentParser(description="Local WebUI for grok_sulfide")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--no-open", action="store_true")
+    parser.add_argument(
+        "--token",
+        default="",
+        help="Require this token on API calls (header X-Grok-WebUI-Token or ?token=). "
+        "Empty = auto-generate a random token.",
+    )
+    parser.add_argument(
+        "--no-token",
+        action="store_true",
+        help="Disable token auth (not recommended; still validates Host).",
+    )
     args = parser.parse_args()
 
+    global WEBUI_TOKEN, WEBUI_HOST, WEBUI_PORT
+    WEBUI_HOST = args.host
+    if args.no_token:
+        WEBUI_TOKEN = ""
+    else:
+        import secrets
+
+        WEBUI_TOKEN = (args.token or "").strip() or secrets.token_urlsafe(24)
+
     server, actual_port = create_server(args.host, max(1, min(args.port, 65516)))
+    WEBUI_PORT = actual_port
     url = f"http://{args.host}:{actual_port}/"
-    print(f"grok_sulfide WebUI: {url}", flush=True)
+    if WEBUI_TOKEN:
+        url_with_token = f"{url}?token={WEBUI_TOKEN}"
+        print(f"grok_sulfide WebUI: {url_with_token}", flush=True)
+        print(f"WebUI token: {WEBUI_TOKEN}", flush=True)
+        open_url = url_with_token
+    else:
+        print(f"grok_sulfide WebUI: {url}", flush=True)
+        print("WebUI token auth: DISABLED (--no-token)", flush=True)
+        open_url = url
     if not args.no_open:
-        threading.Timer(0.7, lambda: webbrowser.open(url)).start()
+        threading.Timer(0.7, lambda: webbrowser.open(open_url)).start()
     try:
         server.serve_forever(poll_interval=0.5)
     except KeyboardInterrupt:

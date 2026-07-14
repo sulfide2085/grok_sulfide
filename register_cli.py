@@ -629,6 +629,12 @@ def _run_protocol_registration(
 
 
 def main() -> int:
+    try:
+        import logging_setup
+
+        logging_setup.init()
+    except Exception:
+        pass
     parser = argparse.ArgumentParser(description="CLI runner for grok_register_ttk (pipelined).")
     parser.add_argument("--count", type=int, default=1, help="账号总数目标（0=不限；含已有）")
     parser.add_argument(

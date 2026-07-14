@@ -18,6 +18,7 @@ protocol_engine/**/sso_output/
 protocol_engine/**/cliproxyapi_auth/
 protocol_engine/**/accounts_output/
 *.log
+logs/
 __pycache__/
 *.pyc
 .venv/

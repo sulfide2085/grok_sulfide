@@ -8,17 +8,43 @@ const state = {
   editingPresetId: "",
   inventoryRequestId: 0,
   pollErrorShown: false,
+  token: "",
 };
 
 const $ = (id) => document.getElementById(id);
 
+function readTokenFromUrl() {
+  try {
+    const params = new URLSearchParams(window.location.search || "");
+    const token = (params.get("token") || params.get("access_token") || "").trim();
+    if (token) {
+      window.sessionStorage.setItem("grok_webui_token", token);
+      return token;
+    }
+    return (window.sessionStorage.getItem("grok_webui_token") || "").trim();
+  } catch (_) {
+    return "";
+  }
+}
+
+state.token = readTokenFromUrl();
+
+function withToken(path) {
+  if (!state.token) return path;
+  const joiner = path.includes("?") ? "&" : "?";
+  return `${path}${joiner}token=${encodeURIComponent(state.token)}`;
+}
+
 async function api(path, options = {}) {
   const request = { ...options, headers: { ...(options.headers || {}) } };
+  if (state.token) {
+    request.headers["X-Grok-WebUI-Token"] = state.token;
+  }
   if (request.method && request.method !== "GET") {
     request.headers["X-Grok-WebUI"] = "1";
     request.headers["Content-Type"] = "application/json";
   }
-  const response = await fetch(path, request);
+  const response = await fetch(withToken(path), request);
   const payload = await response.json().catch(() => ({ ok: false, error: `HTTP ${response.status}` }));
   if (!response.ok || !payload.ok) {
     throw new Error(payload.error || `HTTP ${response.status}`);

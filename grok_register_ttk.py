@@ -1130,7 +1130,7 @@ def yyds_create_account(address=None, domain=None, api_key=None, jwt=None):
     data = resp.json()
     if data.get("success"):
         return data.get("data", {})
-    raise Exception(f"YYDS 鍒涘缓閭澶辫触: {data}")
+    raise Exception(f"YYDS 创建邮箱失败: {data}")
 
 
 def yyds_get_token(address, api_key=None, jwt=None):
@@ -1148,7 +1148,7 @@ def yyds_get_token(address, api_key=None, jwt=None):
     data = resp.json()
     if data.get("success"):
         return data.get("data", {}).get("token")
-    raise Exception(f"YYDS 鑾峰彇token澶辫触: {data}")
+    raise Exception(f"YYDS 获取token失败: {data}")
 
 
 def yyds_get_messages(address, token=None, api_key=None, jwt=None):
@@ -1184,7 +1184,7 @@ def yyds_get_message_detail(message_id, token=None, api_key=None, jwt=None):
     data = resp.json()
     if data.get("success"):
         return data.get("data", {})
-    raise Exception(f"YYDS 鑾峰彇閭欢璇︽儏澶辫触: {data}")
+    raise Exception(f"YYDS 获取邮件详情失败: {data}")
 
 
 def yyds_generate_username(length=10):
@@ -1223,7 +1223,7 @@ def yyds_get_email_and_token(api_key=None, jwt=None):
     if not temp_token:
         temp_token = yyds_get_token(address, api_key=key, jwt=token)
     if not temp_token:
-        raise Exception("鑾峰彇 YYDS token 澶辫触")
+        raise Exception("获取 YYDS token 失败")
     print(f"[*] 宸插垱寤?YYDS 閭: {address}")
     return address, temp_token
 
@@ -1245,7 +1245,7 @@ def yyds_get_oai_code(
             messages = yyds_get_messages(address, token=token, jwt=jwt)
         except Exception as exc:
             if log_callback:
-                log_callback(f"[Debug] YYDS 鎷夊彇閭欢鍒楄〃澶辫触: {exc}")
+                log_callback(f"[Debug] YYDS 拉取邮件列表失败: {exc}")
             sleep_with_cancel(poll_interval, cancel_callback)
             continue
         for msg in messages:
@@ -1260,7 +1260,7 @@ def yyds_get_oai_code(
                 detail = yyds_get_message_detail(msg_id, token=token, jwt=jwt)
             except Exception as exc:
                 if log_callback:
-                    log_callback(f"[Debug] YYDS 鑾峰彇閭欢璇︽儏澶辫触: {exc}")
+                    log_callback(f"[Debug] YYDS 获取邮件详情失败: {exc}")
                 continue
             parts = []
             text_body = detail.get("text") or ""
@@ -1586,7 +1586,7 @@ def get_email_and_token(api_key=None):
     create_account(address, password, api_key=key, expires_in=0)
     token = get_token(address, password)
     if not token:
-        raise Exception("鑾峰彇 DuckMail token 澶辫触")
+        raise Exception("获取 DuckMail token 失败")
     return address, token
 
 
@@ -1686,7 +1686,7 @@ def duckmail_get_oai_code(
             messages = get_messages(dev_token)
         except Exception as exc:
             if log_callback:
-                log_callback(f"[Debug] 鎷夊彇閭欢鍒楄〃澶辫触: {exc}")
+                log_callback(f"[Debug] 拉取邮件列表失败: {exc}")
             sleep_with_cancel(poll_interval, cancel_callback)
             continue
         for msg in messages:
@@ -1701,7 +1701,7 @@ def duckmail_get_oai_code(
                 detail = get_message_detail(dev_token, msg_id)
             except Exception as exc:
                 if log_callback:
-                    log_callback(f"[Debug] 鑾峰彇閭欢璇︽儏澶辫触: {exc}")
+                    log_callback(f"[Debug] 获取邮件详情失败: {exc}")
                 continue
             parts = []
             text_body = detail.get("text") or ""
