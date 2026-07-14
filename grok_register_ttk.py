@@ -32,95 +32,20 @@ from curl_cffi import requests
 import store as _store
 from store import mark_used, mark_error, is_email_used
 
+import config_runtime as _cfg
+from config_runtime import (
+    CONFIG_FILE,
+    DEFAULT_CONFIG,
+    ConfigError,
+    load_env,
+    load_config as _load_config_impl,
+    save_config as _save_config_impl,
+    normalize_runtime_config as _normalize_runtime_config,
+)
 
-CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
 
-# Defaults aligned with docs/REGISTER_PLAYBOOK.md (2026-07-12 dual-reg tests).
-# Primary Hotmail + proxy 7890 + headed CPA OIDC mint for free Grok 4.5.
-DEFAULT_CONFIG = {
-    "email_provider": "hotmail",
-    "defaultDomains": "",
-    "hotmail_accounts_file": "mail_credentials.txt",
-    "hotmail_alias_mode": "primary",
-    "hotmail_alias_random_length": 8,
-    "hotmail_alias_random_max_attempts": 200,
-    "hotmail_max_aliases_per_account": 1,
-    "hotmail_poll_interval": 5,
-    "hotmail_recent_seconds": 900,
-    "hotmail_imap_hosts": "outlook.office365.com,imap-mail.outlook.com",
-    "hotmail_imap_last_n": 30,
-    "hotmail_require_recipient_match": True,
-    "duckmail_api_key": "",
-    "yyds_api_key": "",
-    "yyds_jwt": "",
-    "cloudflare_api_base": "",
-    "cloudflare_api_key": "",
-    "cloudflare_auth_mode": "bearer",
-    "cloudflare_path_domains": "/domains",
-    "cloudflare_path_accounts": "/accounts",
-    "cloudflare_path_token": "/token",
-    "cloudflare_path_messages": "/messages",
-    "proxy": "http://127.0.0.1:7890",
-    "email_proxy": "direct",
-    "cpa_proxy": "http://127.0.0.1:7890",
-    "resin_sticky_enabled": True,
-    "resin_account_prefix": "grok",
-    "enable_nsfw": True,
-    "register_count": 1,
-    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
-    "grok2api_auto_add_local": False,
-    "grok2api_local_token_file": "",
-    "grok2api_pool_name": "ssoBasic",
-    "grok2api_auto_add_remote": False,
-    "grok2api_remote_base": "http://127.0.0.1:8000/admin/api",
-    "grok2api_remote_app_key": "",
-    "grok2api_import_retries": 5,
-    "grok2api_import_retry_delay": 2,
-    "register_threads": 1,
-    "thread_start_interval": 0.8,
-    "show_tutorial_on_start": False,
-    "cloudmail_url": "",
-    "cloudmail_admin_email": "",
-    "cloudmail_password": "",
-    "api_reverse_tools": "",
-    "cpa_export_enabled": True,
-    "cpa_auth_dir": "./cpa_auths",
-    "cpa_copy_to_hotload": False,
-    "cpa_hotload_dir": "",
-    "cpa_base_url": "https://cli-chat-proxy.grok.com/v1",
-    "cpa_management_upload_enabled": False,
-    "cpa_management_base": "https://api.example.com",
-    "cpa_management_key": "",
-    "cpa_headless": False,
-    "cpa_force_standalone": True,
-    "cpa_mint_timeout_sec": 300,
-    "cpa_mint_required": False,
-    "cpa_probe_after_write": True,
-    "cpa_probe_chat": False,
-    "cpa_mint_workers": 1,
-    "cpa_mint_queue_max": 0,
-    "cpa_mint_cookie_inject": True,
-    "cpa_mint_browser_reuse": True,
-    "cpa_mint_browser_recycle_every": 15,
-    "register_max_attempts": 30,
-    "account_hard_timeout": 720,
-    "nav_email_button_timeout": 12,
-    "email_form_timeout": 45,
-    "mail_timeout": 150,
-    "mail_poll_interval": 0.3,
-    "mail_retry_count": 3,
-    "code_form_timeout": 180,
-    "profile_timeout": 240,
-    "turnstile_retry_limit": 3,
-    "turnstile_stuck_timeout": 150,
-    "sso_timeout_base": 240,
-    "sso_timeout_max": 480,
-    "sso_progress_extension": 120,
-    "sso_cookie_read_timeout": 20,
-    "email_submit_confirm_timeout": 60,
-}
-
-config = DEFAULT_CONFIG.copy()
+# Config lives in config_runtime; keep mutable `config` identity for legacy callers.
+config = _cfg.config
 _cf_domain_index = 0
 # CloudMail 公开 token 单例（多线程共享，避免并发覆盖）
 _cloudmail_public_token = None
@@ -413,93 +338,27 @@ def save_cookies_snapshot(page, tag: str = "", email: str = ""):
 
 
 def load_env():
-    """从 .env 文件加载环境变量（零依赖）。
-    只在 os.environ 中尚未设置该 KEY 时填入（真实环境变量优先）。
-    """
-    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
-    if not os.path.isfile(env_path):
-        return
-    try:
-        with open(env_path, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                key, _, val = line.partition("=")
-                key = key.strip()
-                val = val.strip().strip('"').strip("'")
-                if key and key not in os.environ:
-                    os.environ[key] = val
-    except Exception:
-        pass
+    _cfg.load_env()
 
 
 class RegistrationCancelled(Exception):
     pass
 
 
-def _normalize_runtime_config(cfg: dict) -> dict:
-    """Apply playbook defaults and coerce hotmail primary-only policy."""
-    if not isinstance(cfg, dict):
-        return DEFAULT_CONFIG.copy()
-    out = {**DEFAULT_CONFIG, **cfg}
-
-    provider = str(out.get("email_provider") or "hotmail").strip().lower()
-    if provider in ("outlook", "outlookmail", "microsoft"):
-        provider = "hotmail"
-    out["email_provider"] = provider or "hotmail"
-
-    alias_mode = str(out.get("hotmail_alias_mode") or "primary").strip().lower()
-    if alias_mode in ("", "main", "bare", "no_alias", "no-alias"):
-        alias_mode = "primary"
-    out["hotmail_alias_mode"] = alias_mode
-
-    try:
-        max_aliases = int(out.get("hotmail_max_aliases_per_account") or 1)
-    except Exception:
-        max_aliases = 1
-    if alias_mode == "primary":
-        max_aliases = 1
-    out["hotmail_max_aliases_per_account"] = max(1, max_aliases)
-
-    # Mint must not silently fall back to "no proxy" when playbook expects 7890.
-    proxy = str(out.get("proxy") or "").strip()
-    cpa_proxy = str(out.get("cpa_proxy") or "").strip()
-    if not cpa_proxy and proxy:
-        out["cpa_proxy"] = proxy
-    if not str(out.get("cpa_base_url") or "").strip():
-        out["cpa_base_url"] = "https://cli-chat-proxy.grok.com/v1"
-    return out
-
-
 def load_config():
-    load_env()
+    """Load into the shared config dict (same object identity as config_runtime.config)."""
+    loaded = _load_config_impl()
+    # Ensure module-level `config` name stays bound to the shared dict.
     global config
-    if os.path.exists(CONFIG_FILE):
-        try:
-            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-                loaded = json.load(f)
-            # Allow "// comment" keys in config.example.json / config.json templates.
-            if isinstance(loaded, dict):
-                loaded = {
-                    k: v
-                    for k, v in loaded.items()
-                    if not (isinstance(k, str) and (k.startswith("//") or k.startswith("#")))
-                }
-            config = _normalize_runtime_config(loaded)
-        except Exception:
-            config = DEFAULT_CONFIG.copy()
-    else:
-        config = DEFAULT_CONFIG.copy()
+    config = _cfg.config
+    # Also re-export so `from grok_register_ttk import config` remains live.
     return config
 
 
 def save_config():
-    try:
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=4, ensure_ascii=False)
-    except Exception as e:
-        print(f"保存配置失败: {e}")
+    global config
+    config = _cfg.config
+    _save_config_impl()
 
 
 def ensure_stable_python_runtime():
