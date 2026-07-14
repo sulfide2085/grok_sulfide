@@ -1,7 +1,7 @@
 [project]
 name = "grok-sulfide"
 version = "1.0.0"
-description = "Standalone Grok registrar with bundled Hotmail and CPA/OIDC support"
+description = "Grok registrar with Outlook mailbox support and CPA/OIDC export"
 requires-python = ">=3.12,<3.14"
 dependencies = [
     "DrissionPage>=4.1",

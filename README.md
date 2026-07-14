@@ -1,22 +1,22 @@
 # grok_sulfide
 
-独立运行的 Grok 注册机。注册、Hotmail OAuth2/IMAP 验证码、SSO 输出以及
-CPA/xAI OIDC 凭据生成代码都在本目录中，不会加载 `grok_bytao`、
-`grok_reg-protocol_cpa` 或其他兄弟项目。
+Grok 账号注册工具：支持浏览器注册与协议注册，内置 Outlook 邮箱验证码读取，并可导出 SSO / CPA（xAI OIDC）凭据。
 
-## 包含内容
+## 功能
 
-- `register_cli.py`：命令行批量注册入口
-- `grok_register_gui.py`：桌面 GUI 入口
-- `grok_register_ttk.py`：注册流程核心
-- `webui_server.py`、`webui/`：本地 WebUI 与静态资源
-- `hotmail_provider.py`：内置 Hotmail/Outlook OAuth2 + IMAP 提供器
-- `cpa_xai/`、`cpa_export.py`：内置 CPA/xAI OIDC 生成与导出
-- `protocol_engine/grok-build-auth/`、`protocol_register.py`：内置协议注册、SSO 与 CPA OAuth
-- `turnstilePatch/`：浏览器扩展
+- **浏览器注册**：Chromium 自动化完成注册页流程
+- **协议注册**：HTTP 协议建号（无需注册页浏览器）
+- **邮箱**：Hotmail/Outlook OAuth2 + IMAP；协议模式还可接 MoeMail 等
+- **凭据输出**：`accounts_cli.txt`（SSO）与 `cpa_auths/xai-*.json`（OIDC）
+- **入口**：WebUI / CLI / 桌面 GUI
+- **可选入池**：管理 API 或免密 SSH 上传 CPA 凭据
 
-项目仍需要 Python 包、Chrome/Chromium、邮箱服务和 xAI 网络服务；“独立”是指
-不依赖工作区里的其他本地项目或源码目录。
+## 环境要求
+
+- Python 3.12 / 3.13
+- Windows（推荐；脚本以 PowerShell 为主）
+- 浏览器注册需要 Chrome/Chromium
+- 可用的邮箱池与网络代理（按你的环境配置）
 
 ## 安装
 
@@ -29,13 +29,17 @@ Copy-Item config.example.json config.json
 Copy-Item mail_credentials.example.txt mail_credentials.txt
 ```
 
-`mail_credentials.txt` 每行格式：
+编辑 `config.json`（代理、注册方式等），并按下面格式填写邮箱凭据。
+
+### 邮箱凭据格式
+
+`mail_credentials.txt` 每行一条：
 
 ```text
 email----password----ClientID----refresh_token
 ```
 
-从单列 CSV 导入并排除旧项目使用记录：
+从 CSV 导入邮箱池（可选）：
 
 ```powershell
 python scripts/import_outlook_csv_pool.py `
@@ -45,9 +49,7 @@ python scripts/import_outlook_csv_pool.py `
   --output mail_credentials_imported_free.txt
 ```
 
-导入是一次性快照；运行时仍只读取 sulfide 本目录，不依赖旧项目。
-
-默认使用主邮箱一次，不启用 `+alias`：
+默认建议先用主邮箱、不启用 `+alias`：
 
 ```json
 {
@@ -57,66 +59,92 @@ python scripts/import_outlook_csv_pool.py `
 }
 ```
 
-## 运行
+## 快速开始
 
 ```powershell
-# WebUI，默认自动打开 http://127.0.0.1:8765/
+# WebUI（默认 http://127.0.0.1:8765/）
 .\start_webui.ps1
 
-# 新注册 1 个账号
+# 浏览器注册 1 个
 python register_cli.py --extra 1 --threads 1 --mint-workers 1
 
-# grokcli-2api 协议注册（不走 Chromium 注册页面）
+# 协议注册 1 个
 python register_cli.py --extra 1 --threads 1 --registration-method protocol
 
-# 使用保存的注册预设
+# 使用预设
 python register_cli.py --extra 1 --preset preset1
 python register_cli.py --extra 1 --preset preset2
 
-# GUI
+# 桌面 GUI
 python grok_register_gui.py
 ```
 
-也可以直接启动 WebUI：
+也可直接：
 
 ```powershell
 python webui_server.py
 python webui_server.py --port 8800 --no-open
 ```
 
-若端口已占用，WebUI 会在随后 20 个端口中自动选择一个。默认仅监听
-`127.0.0.1`，页面展示的账号邮箱经过脱敏，不返回密码或 SSO。
+端口占用时会在随后 20 个端口中自动选取。默认只监听 `127.0.0.1`；页面上的邮箱会脱敏，不返回密码或 SSO。
 
-WebUI 的每个注册预设独立保存注册方式、邮箱提供器、代理、邮箱凭据、
-别名策略、CPA/OIDC 和入池设置。运行页只需选择预设；配置页可以编辑、
-新建或删除预设。默认包含：
+## 注册方式
 
-- `preset1`：sulfide 浏览器注册 + 原始 Outlook 主邮箱配置
-- `preset2`：grokcli-2api 协议注册 + Outlook 随机别名池
+| 方式 | 说明 |
+|------|------|
+| `browser` | 打开 Chromium 走注册页；CPA mint 可走独立 worker 队列 |
+| `protocol` | 协议建号 + 邮箱验证码；Turnstile 可选 YesCaptcha；CPA 在协议链内完成 |
 
-Outlook 的别名开关和别名数量上限位于运行页，属于本次任务覆盖项。
-关闭别名时列表只显示尚未注册的主邮箱；开启别名时会按每个主邮箱
-已使用的别名数量计算剩余额度，并显示当前可生成的别名账号总数。
-
-主要输出：
+两种方式都会尽量写出：
 
 - `accounts_cli.txt`：`email----password----sso`
-- `cpa_auths/xai-*.json`：启用 CPA 导出时生成的 xAI OIDC 凭据
-- `emails_used.txt` / `emails_error.txt`：邮箱使用记录
+- `cpa_auths/xai-<email>.json`：OIDC 凭据（启用 CPA 导出时）
 
-## 配置提示
+协议模式未配置 `protocol_yescaptcha_key` 时会先尝试直接建号；若拿不到 SSO/CPA，账号仍会写入 `accounts_cli.txt`，可稍后补 mint。
 
-- `proxy`：注册浏览器和普通 HTTP 请求使用的代理
-- `email_proxy`：邮箱 OAuth 请求代理；默认 `direct`
-- `cpa_proxy`：CPA/OIDC 流程代理；为空时回退到 `proxy`
-- `cpa_management_upload_enabled`：默认关闭；需要上传远端池时再开启并配置密钥
-- `registration_method`：`browser` 或 `protocol`
-- `protocol_email_provider`：协议模式收件后端；默认 `outlook`，也可选 `moemail`、`duckmail`、`yyds`、`cloudflare`、`cloudmail`
-- `protocol_moemail_*` / `protocol_yescaptcha_key`：协议注册使用的邮箱和 Turnstile 配置
-- `cpa_ssh_upload_enabled`：独立的 SSH 自动入池开关，不替换管理 API 的地址或密钥
-- `api_reverse_tools`：应保持为空，默认使用本项目内的 `cpa_xai/`
+## WebUI 预设
 
-免密 SSH 自动入池示例：
+每个预设可保存注册方式、邮箱提供器、代理、凭据路径、别名策略、CPA 与入池设置。
+
+- 运行页：选预设、设数量/线程/别名覆盖项后启动
+- 配置页：编辑、新建、删除预设
+
+示例：
+
+- `preset1`：浏览器注册 + Outlook 主邮箱
+- `preset2`：协议注册 + Outlook 随机别名
+
+别名开关与数量上限在运行页，作用于当次任务。关闭别名时只显示未用主邮箱；开启时按每个主邮箱剩余别名额度汇总。
+
+## 主要输出
+
+| 文件 | 内容 |
+|------|------|
+| `accounts_cli.txt` | `email----password----sso` |
+| `cpa_auths/xai-*.json` | xAI OIDC / CPA 凭据 |
+| `emails_used.txt` / `emails_error.txt` | 邮箱使用与失败记录 |
+
+补生成 CPA：
+
+```powershell
+python scripts\backfill_cpa_xai_from_accounts.py --limit 1 --probe --timeout 300
+```
+
+## 配置要点
+
+| 键 | 含义 |
+|----|------|
+| `proxy` | 注册浏览器 / 普通 HTTP 代理 |
+| `email_proxy` | 邮箱 OAuth 代理，默认 `direct` |
+| `cpa_proxy` | CPA/OIDC 代理；空则回退 `proxy` |
+| `registration_method` | `browser` 或 `protocol` |
+| `protocol_email_provider` | 协议收件：`outlook` / `moemail` / `duckmail` / `yyds` / `cloudflare` / `cloudmail` |
+| `protocol_yescaptcha_key` | 协议 Turnstile（可选） |
+| `cpa_export_enabled` | 是否写 CPA JSON |
+| `cpa_management_upload_enabled` | 管理 API 入池（默认关） |
+| `cpa_ssh_upload_enabled` | SSH 入池（默认关） |
+
+SSH 入池示例：
 
 ```json
 {
@@ -127,13 +155,34 @@ Outlook 的别名开关和别名数量上限位于运行页，属于本次任务
 }
 ```
 
-两种注册方式都会规范化写入 `accounts_cli.txt` 的
-`email----password----sso`，并生成 `cpa_auths/xai-<email>.json`。
+完整字段见 `config.example.json`，运行细节见 [docs/REGISTER_PLAYBOOK.md](docs/REGISTER_PLAYBOOK.md)。
 
-`protocol_yescaptcha_key` 是可选项。未配置时协议模式先直接创建账号；
-若当前 xAI 会话无法无验证码提取 SSO/CPA，账号仍会保存到
-`accounts_cli.txt`，并在 WebUI 中显示 CPA 待生成，之后可执行补提取。
-配置后，协议链会在邮箱校验完成后生成注册 Turnstile；若建号响应仍未附带
-SSO，则再生成一次登录 Turnstile，通过 `CreateSession` 恢复会话后执行 OAuth/CPA。
+## 目录结构（节选）
 
-完整运行说明见 [docs/REGISTER_PLAYBOOK.md](docs/REGISTER_PLAYBOOK.md)。
+```text
+register_cli.py          CLI 批量注册
+grok_register_gui.py     桌面 GUI
+grok_register_ttk.py     浏览器注册核心
+webui_server.py / webui/ 本地 WebUI
+hotmail_provider.py      Outlook OAuth2 + IMAP
+protocol_register.py     协议注册入口
+protocol_engine/         协议引擎
+cpa_xai/ / cpa_export.py CPA/OIDC 生成与导出
+scripts/                 导入邮箱池、补 mint 等
+```
+
+## 安全说明
+
+以下文件含敏感信息，**不要提交或公开分享**：
+
+- `config.json`
+- `mail_credentials.txt` 及各类邮箱池
+- `accounts_*.txt`
+- `cpa_auths/*.json`
+- `cookies/`、`screenshots/`、日志
+
+仓库 `.gitignore` 已忽略上述运行时文件。分享目录前可参考 `SHARE_BEFORE_SEND.txt`。
+
+## 免责声明
+
+仅供学习与研究。请遵守 xAI / Microsoft 等服务的服务条款与当地法律；滥用账号批量注册可能违反平台规则并导致封禁。
