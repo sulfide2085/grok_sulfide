@@ -32,6 +32,10 @@ from curl_cffi import requests
 import store as _store
 from store import mark_used, mark_error, is_email_used
 
+import providers
+from providers import get_provider
+from providers.common import generate_username as _providers_generate_username
+
 import config_runtime as _cfg
 from config_runtime import (
     CONFIG_FILE,
@@ -920,7 +924,7 @@ def http_post(url, **kwargs):
 
 def raise_if_cancelled(cancel_callback=None):
     if cancel_callback and cancel_callback():
-        raise RegistrationCancelled("鐢ㄦ埛鍋滄娉ㄥ唽")
+        raise RegistrationCancelled("用户停止注册")
 
 
 def sleep_with_cancel(seconds, cancel_callback=None):
@@ -1195,7 +1199,7 @@ def yyds_generate_username(length=10):
 def yyds_pick_domain(api_key=None, jwt=None):
     domains = yyds_get_domains(api_key=api_key, jwt=jwt)
     if not domains:
-        raise Exception("YYDS 娌℃湁杩斿洖浠讳綍鍙敤鍩熷悕")
+        raise Exception("YYDS 没有返回任何可用域名")
     private = [d for d in domains if d.get("isVerified") and not d.get("isPublic")]
     if private:
         return private[0]["domain"]
@@ -1205,7 +1209,7 @@ def yyds_pick_domain(api_key=None, jwt=None):
     verified = [d for d in domains if d.get("isVerified")]
     if verified:
         return verified[0]["domain"]
-    raise Exception("YYDS 鏃犲凡楠岃瘉鍩熷悕鍙敤")
+    raise Exception("YYDS 无已验证域名可用")
 
 
 def yyds_get_email_and_token(api_key=None, jwt=None):
@@ -1224,7 +1228,7 @@ def yyds_get_email_and_token(api_key=None, jwt=None):
         temp_token = yyds_get_token(address, api_key=key, jwt=token)
     if not temp_token:
         raise Exception("获取 YYDS token 失败")
-    print(f"[*] 宸插垱寤?YYDS 閭: {address}")
+    print(f"[*] 已创建 YYDS 邮箱: {address}")
     return address, temp_token
 
 
@@ -1272,25 +1276,24 @@ def yyds_get_oai_code(
             combined = "\n".join(parts)
             subject = detail.get("subject", "")
             if log_callback:
-                log_callback(f"[Debug] YYDS 鏀跺埌閭欢: {subject}")
+                log_callback(f"[Debug] YYDS 收到邮件: {subject}")
             code = extract_verification_code(combined, subject)
             if code:
                 if log_callback:
-                    log_callback(f"[*] YYDS 浠庨偖浠朵腑鎻愬彇鍒伴獙璇佺爜: {code}")
+                    log_callback(f"[*] YYDS 从邮件中提取到验证码: {code}")
                 return code
         sleep_with_cancel(poll_interval, cancel_callback)
     raise Exception(f"YYDS 在 {timeout}s 内未收到验证码邮件")
 
 
 def generate_username(length=10):
-    chars = string.ascii_lowercase + string.digits
-    return "".join(secrets.choice(chars) for _ in range(length))
+    return _providers_generate_username(length)
 
 
 def pick_domain(api_key=None):
     domains = get_domains(api_key=api_key)
     if not domains:
-        raise Exception("DuckMail 娌℃湁杩斿洖浠讳綍鍙敤鍩熷悕")
+        raise Exception("DuckMail 没有返回任何可用域名")
     private = [d for d in domains if d.get("ownerId")]
     verified_private = [d for d in private if d.get("isVerified")]
     if verified_private:
@@ -1298,7 +1301,7 @@ def pick_domain(api_key=None):
     public = [d for d in domains if d.get("isVerified")]
     if public:
         return public[0]["domain"]
-    raise Exception("DuckMail 鏃犲凡楠岃瘉鍩熷悕鍙敤")
+    raise Exception("DuckMail 无已验证域名可用")
 
 
 # ──────────────────────── CloudMail (maillab/cloud-mail) ────────────────────────
@@ -1530,64 +1533,8 @@ def _hotmail_bridge():
 
 
 def get_email_and_token(api_key=None):
-    provider = get_email_provider()
-    if provider in ("hotmail", "outlook", "outlookmail", "microsoft"):
-        return _hotmail_bridge().hotmail_get_email_and_token()
-    if provider == "yyds":
-        return yyds_get_email_and_token(api_key=api_key, jwt=get_yyds_jwt())
-    if provider == "cloudmail":
-        # CloudMail catch-all 模式：直接生成随机邮箱，无需注册
-        # Cloudflare Email Routing 会自动将所有该域名的邮件路由到 Worker
-        # 支持英文逗号、中文逗号、空格分隔
-        raw = str(config.get("defaultDomains", "") or "")
-        domains = [x.strip() for x in re.split(r"[,，\s]+", raw) if x.strip()]
-        if not domains:
-            raise Exception("CloudMail 需要在 defaultDomains 中配置可用域名")
-        global _cf_domain_index
-        domain = domains[_cf_domain_index % len(domains)]
-        _cf_domain_index += 1
-        username = generate_username(10)
-        address = f"{username}@{domain}"
-        # 返回占位 token（实际不用于邮件查询，邮件查询走公开 API）
-        return address, "cloudmail_catch_all"
-    if provider == "cloudflare":
-        api_base = get_cloudflare_api_base()
-        if not api_base:
-            raise Exception("Cloudflare API Base 未配置")
-        try:
-            # cloudflare_temp_email 专用模式
-            return cloudflare_create_temp_address(api_base)
-        except Exception as primary_exc:
-            # 兜底回退到 Mail.tm 风格
-            key = api_key or get_cloudflare_api_key()
-            domains = cloudflare_get_domains(api_base, api_key=key)
-            if not domains:
-                raise Exception(f"Cloudflare 创建邮箱失败: {primary_exc}")
-            verified = [d for d in domains if d.get("isVerified")]
-            target = verified[0] if verified else domains[0]
-            domain = target.get("domain")
-            if not domain:
-                raise Exception("Cloudflare 域名数据格式错误，缺少 domain 字段")
-            username = generate_username(10)
-            address = f"{username}@{domain}"
-            password = secrets.token_urlsafe(12)
-            cloudflare_create_account(
-                api_base, address, password, api_key=key, expires_in=0
-            )
-            token = cloudflare_get_token(api_base, address, password, api_key=key)
-            if not token:
-                raise Exception("获取 Cloudflare 邮箱 token 失败")
-            return address, token
-    key = api_key or get_duckmail_api_key()
-    domain = pick_domain(api_key=key)
-    username = generate_username(10)
-    address = f"{username}@{domain}"
-    password = secrets.token_urlsafe(12)
-    create_account(address, password, api_key=key, expires_in=0)
-    token = get_token(address, password)
-    if not token:
-        raise Exception("获取 DuckMail token 失败")
-    return address, token
+    providers.bind_host(sys.modules[__name__])
+    return get_provider(get_email_provider()).get_email_and_token(api_key)
 
 
 def get_oai_code(
@@ -1599,54 +1546,15 @@ def get_oai_code(
     cancel_callback=None,
     resend_callback=None,
 ):
-    provider = get_email_provider()
-    if provider in ("hotmail", "outlook", "outlookmail", "microsoft"):
-        return _hotmail_bridge().hotmail_get_oai_code(
-            dev_token,
-            email,
-            timeout=timeout,
-            poll_interval=poll_interval,
-            log_callback=log_callback,
-            cancel_callback=cancel_callback,
-            resend_callback=resend_callback,
-        )
-    if provider == "yyds":
-        return yyds_get_oai_code(
-            dev_token,
-            email,
-            timeout=timeout,
-            poll_interval=poll_interval,
-            log_callback=log_callback,
-            jwt=get_yyds_jwt(),
-            cancel_callback=cancel_callback,
-        )
-    if provider == "cloudmail":
-        return cloudmail_get_oai_code(
-            dev_token,
-            email,
-            timeout=timeout,
-            poll_interval=poll_interval,
-            log_callback=log_callback,
-            cancel_callback=cancel_callback,
-            resend_callback=resend_callback,
-        )
-    if provider == "cloudflare":
-        return cloudflare_get_oai_code(
-            dev_token,
-            email,
-            timeout=timeout,
-            poll_interval=poll_interval,
-            log_callback=log_callback,
-            cancel_callback=cancel_callback,
-            resend_callback=resend_callback,
-        )
-    return duckmail_get_oai_code(
+    providers.bind_host(sys.modules[__name__])
+    return get_provider(get_email_provider()).get_oai_code(
         dev_token,
         email,
         timeout=timeout,
         poll_interval=poll_interval,
         log_callback=log_callback,
         cancel_callback=cancel_callback,
+        resend_callback=resend_callback,
     )
 
 
@@ -1713,11 +1621,11 @@ def duckmail_get_oai_code(
             combined = "\n".join(parts)
             subject = detail.get("subject", "")
             if log_callback:
-                log_callback(f"[Debug] 鏀跺埌閭欢: {subject}")
+                log_callback(f"[Debug] 收到邮件: {subject}")
             code = extract_verification_code(combined, subject)
             if code:
                 if log_callback:
-                    log_callback(f"[*] 浠庨偖浠朵腑鎻愬彇鍒伴獙璇佺爜: {code}")
+                    log_callback(f"[*] 从邮件中提取到验证码: {code}")
                 return code
         sleep_with_cancel(poll_interval, cancel_callback)
     raise Exception(f"在 {timeout}s 内未收到验证码邮件")
@@ -4355,6 +4263,9 @@ def main():
     app = GrokRegisterGUI(root)
     root.mainloop()
 
+
+# Bind mail providers to this module's http/config helpers.
+providers.bind_host(sys.modules[__name__])
 
 if __name__ == "__main__":
     main()
