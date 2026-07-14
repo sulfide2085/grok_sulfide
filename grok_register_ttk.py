@@ -29,6 +29,9 @@ from DrissionPage import ChromiumOptions
 from DrissionPage.errors import PageDisconnectedError
 from curl_cffi import requests
 
+import store as _store
+from store import mark_used, mark_error, is_email_used
+
 
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
 
@@ -126,55 +129,28 @@ _hotmail_bridge_module = None
 
 
 
-# ── 邮箱追踪 ──
+# ── 邮箱追踪（实现见 store.py） ──
 
-_EMAILS_USED_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "emails_used.txt")
-_EMAILS_ERROR_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "emails_error.txt")
-_email_track_lock = threading.Lock()
+_EMAILS_USED_FILE = _store._EMAILS_USED_FILE
+_EMAILS_ERROR_FILE = _store._EMAILS_ERROR_FILE
+_email_track_lock = _store._email_track_lock
 
 
-def mark_used(email: str, password: str = ""):
-    """记录成功注册的邮箱，防止重复使用。"""
-    with _email_track_lock:
-        with open(_EMAILS_USED_FILE, "a", encoding="utf-8") as f:
-            f.write(f"{email}----{password}----ok\n")
-    # Keep Hotmail bridge / protocol_cpa tracker in sync (same mailbox pool).
-    try:
+def _sync_store_hooks():
+    """Point store side-channel hooks at hotmail bridge when loaded."""
+    def _used(email, password=""):
         if _hotmail_bridge_module is not None and hasattr(_hotmail_bridge_module, "mark_used"):
             _hotmail_bridge_module.mark_used(email, password)
-    except Exception:
-        pass
 
-
-def mark_error(email: str, password: str = "", reason: str = ""):
-    """记录失败邮箱及原因，避免重试烂邮箱。"""
-    email = (email or "").strip()
-    if not email or "@" not in email:
-        return
-    reason = (reason or "").replace("\n", " ").replace("\r", " ").strip()[:200]
-    with _email_track_lock:
-        with open(_EMAILS_ERROR_FILE, "a", encoding="utf-8") as f:
-            f.write(f"{email}----{password}----{reason}\n")
-    try:
+    def _err(email, password="", reason=""):
         if _hotmail_bridge_module is not None and hasattr(_hotmail_bridge_module, "mark_error"):
             _hotmail_bridge_module.mark_error(email, password, reason)
-    except Exception:
-        pass
+
+    _store.set_ledger_hooks(mark_used_hook=_used, mark_error_hook=_err)
 
 
-def is_email_used(email: str) -> bool:
-    """检查邮箱是否已被使用或标记为失败。"""
-    email_lower = email.strip().lower()
-    for fpath in (_EMAILS_USED_FILE, _EMAILS_ERROR_FILE):
-        if os.path.exists(fpath):
-            with open(fpath, encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if line and not line.startswith("#"):
-                        parts = line.split("----")
-                        if parts and parts[0].strip().lower() == email_lower:
-                            return True
-    return False
+def _collect_local_consumed_emails() -> set:
+    return _store.collect_local_consumed_emails(config)
 
 
 class EmailAlreadyRegisteredError(Exception):
@@ -311,55 +287,6 @@ def raise_if_otp_rate_limited(email: str = "", page=None, log_callback=None):
     raise EmailOtpRateLimitedError(
         email, f"xAI 验证码发送过多，请稍后重试 ({hit}): {email}"
     )
-
-
-def _collect_local_consumed_emails() -> set:
-    """Emails already consumed by bytao (used/error/accounts/cpa)."""
-    found = set()
-    for fpath in (_EMAILS_USED_FILE, _EMAILS_ERROR_FILE):
-        if not os.path.exists(fpath):
-            continue
-        try:
-            with open(fpath, encoding="utf-8", errors="ignore") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line or line.startswith("#"):
-                        continue
-                    parts = line.split("----")
-                    if parts and "@" in parts[0]:
-                        found.add(parts[0].strip().lower())
-        except Exception:
-            pass
-    accounts_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "accounts_cli.txt")
-    if os.path.exists(accounts_file):
-        try:
-            with open(accounts_file, encoding="utf-8", errors="ignore") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line or line.startswith("#"):
-                        continue
-                    email = line.split("----", 1)[0].strip().lower()
-                    if "@" in email:
-                        found.add(email)
-                        # bare primary also burns primary-only quota
-                        if "+" in email.split("@", 1)[0]:
-                            local, domain = email.split("@", 1)
-                            found.add(f"{local.split('+', 1)[0]}@{domain}")
-        except Exception:
-            pass
-    cpa_dir = config.get("cpa_auth_dir") or "./cpa_auths"
-    if not os.path.isabs(cpa_dir):
-        cpa_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), cpa_dir)
-    if os.path.isdir(cpa_dir):
-        try:
-            for name in os.listdir(cpa_dir):
-                if name.startswith("xai-") and name.endswith(".json"):
-                    email = name[4:-5].strip().lower()
-                    if "@" in email:
-                        found.add(email)
-        except Exception:
-            pass
-    return found
 
 
 # ── 页面状态快照 ──
@@ -1731,6 +1658,7 @@ def _hotmail_bridge():
         import hotmail_provider
 
         _hotmail_bridge_module = hotmail_provider
+        _sync_store_hooks()
     _hotmail_bridge_module.configure(
         config,
         is_email_used=is_email_used,
