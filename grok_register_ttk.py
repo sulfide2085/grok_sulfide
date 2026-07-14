@@ -36,6 +36,28 @@ import providers
 from providers import get_provider
 from providers.common import generate_username as _providers_generate_username
 
+import browser as _browser_mod
+from browser import (
+    CHROMIUM_SLIM_FLAGS,
+    create_browser_options,
+    get_browser as _get_browser,
+    set_browser as _set_browser,
+    get_page as _get_page,
+    set_page as _set_page,
+    start_browser,
+    stop_browser,
+    prepare_browser_for_next_account,
+    shutdown_browser,
+    restart_browser,
+    sync_active_page,
+    refresh_active_page,
+)
+from proxy_bridge import (
+    cleanup_proxy_bridges as _cleanup_proxy_bridges,
+    start_authenticated_proxy_bridge as _start_authenticated_proxy_bridge,
+    stop_authenticated_proxy_bridge as _stop_authenticated_proxy_bridge,
+)
+
 import config_runtime as _cfg
 from config_runtime import (
     CONFIG_FILE,
@@ -736,153 +758,9 @@ def add_token_to_grok2api_pools(raw_token, email="", log_callback=None):
     _add_token_to_grok2api_pools_sync(raw_token, email=email, log_callback=log_callback)
 
 
-CHROMIUM_SLIM_FLAGS = [
-    "--disable-gpu",
-    "--disable-software-rasterizer",
-    "--no-sandbox",
-    "--disable-dev-shm-usage",
-    "--disable-images",
-    "--mute-audio",
-    "--disable-background-networking",
-    "--no-first-run",
-]
-
-
-_BROWSER_PROXY_UNSET = object()
-_proxy_bridge_cache = {}
-_proxy_bridge_lock = threading.Lock()
-
-
-class _AuthenticatedProxyBridge(socketserver.ThreadingMixIn, socketserver.TCPServer):
-    allow_reuse_address = True
-    daemon_threads = True
-
-
-class _AuthenticatedProxyHandler(socketserver.BaseRequestHandler):
-    def handle(self):
-        client = self.request
-        client.settimeout(20)
-        initial = b""
-        while b"\r\n\r\n" not in initial and len(initial) < 65536:
-            chunk = client.recv(8192)
-            if not chunk:
-                return
-            initial += chunk
-        if b"\r\n\r\n" not in initial:
-            return
-
-        header, body = initial.split(b"\r\n\r\n", 1)
-        lines = header.split(b"\r\n")
-        filtered = [
-            line for line in lines if not line.lower().startswith(b"proxy-authorization:")
-        ]
-        filtered.insert(1, self.server.proxy_auth_header)
-
-        upstream = socket.create_connection(self.server.upstream_address, timeout=15)
-        try:
-            upstream.settimeout(None)
-            client.settimeout(None)
-            upstream.sendall(b"\r\n".join(filtered) + b"\r\n\r\n" + body)
-            sockets = [client, upstream]
-            while True:
-                readable, _, exceptional = select.select(sockets, [], sockets, 60)
-                if exceptional or not readable:
-                    return
-                for source in readable:
-                    data = source.recv(65536)
-                    if not data:
-                        return
-                    target = upstream if source is client else client
-                    target.sendall(data)
-        finally:
-            upstream.close()
-
-
-def _cleanup_proxy_bridges():
-    for server, _thread in list(_proxy_bridge_cache.values()):
-        try:
-            server.shutdown()
-            server.server_close()
-        except Exception:
-            pass
-
-
-atexit.register(_cleanup_proxy_bridges)
-
-
-def _stop_authenticated_proxy_bridge(proxy_url):
-    with _proxy_bridge_lock:
-        cached = _proxy_bridge_cache.pop(proxy_url, None)
-    if not cached:
-        return
-    server, _thread = cached
-    try:
-        server.shutdown()
-        server.server_close()
-    except Exception:
-        pass
-
-
-def _start_authenticated_proxy_bridge(proxy_url):
-    from urllib.parse import unquote, urlparse
-
-    parsed = urlparse(proxy_url if "://" in proxy_url else f"http://{proxy_url}")
-    if not parsed.hostname or parsed.username is None:
-        return proxy_url
-    if (parsed.scheme or "http").lower() != "http":
-        raise ValueError("Chromium 认证代理转发目前仅支持 http:// 上游")
-    username = unquote(parsed.username)
-    password = unquote(parsed.password or "")
-    port = parsed.port or 80
-    with _proxy_bridge_lock:
-        cached = _proxy_bridge_cache.get(proxy_url)
-        if cached:
-            server, thread = cached
-            if thread.is_alive():
-                return f"http://127.0.0.1:{server.server_address[1]}"
-
-        server = _AuthenticatedProxyBridge(("127.0.0.1", 0), _AuthenticatedProxyHandler)
-        server.upstream_address = (parsed.hostname, port)
-        credentials = base64.b64encode(f"{username}:{password}".encode("utf-8")).decode("ascii")
-        server.proxy_auth_header = f"Proxy-Authorization: Basic {credentials}".encode("ascii")
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-        _proxy_bridge_cache[proxy_url] = (server, thread)
-        return f"http://127.0.0.1:{server.server_address[1]}"
-
-
-def create_browser_options(proxy_override=_BROWSER_PROXY_UNSET):
-    options = ChromiumOptions()
-    options.auto_port()
-    options.set_timeouts(base=1)
-    for flag in CHROMIUM_SLIM_FLAGS:
-        options.set_argument(flag)
-    if os.path.exists(EXTENSION_PATH):
-        options.add_extension(EXTENSION_PATH)
-    # Apply config.json "proxy" to Chromium. Without this, only HTTP helpers
-    # used get_proxies(); the browser itself fell through to system/env proxy.
-    if proxy_override is _BROWSER_PROXY_UNSET:
-        proxy = get_registration_proxy()
-    else:
-        proxy = str(proxy_override or "").strip()
-    if proxy:
-        try:
-            from urllib.parse import urlparse
-
-            u = urlparse(proxy if "://" in proxy else f"http://{proxy}")
-            host = u.hostname or ""
-            if host:
-                port = u.port or (443 if (u.scheme or "http") == "https" else 80)
-                scheme = u.scheme or "http"
-                if u.username is not None:
-                    browser_proxy = _start_authenticated_proxy_bridge(proxy)
-                    options.set_argument(f"--proxy-server={browser_proxy}")
-                    print(f"  [proxy] Chromium auth bridge -> {host}:{port}")
-                else:
-                    options.set_argument(f"--proxy-server={scheme}://{host}:{port}")
-        except Exception as e:
-            print(f"  [proxy] set browser proxy failed: {e}")
-    return options
+# Browser/proxy implementation lives in browser.py / proxy_bridge.py
+_BROWSER_PROXY_UNSET = _browser_mod._BROWSER_PROXY_UNSET
+EXTENSION_PATH = _browser_mod.EXTENSION_PATH
 
 
 def _build_request_kwargs(**kwargs):
@@ -957,6 +835,16 @@ def human_sleep(mean_seconds, cancel_callback=None):
     sleep_with_cancel(delay, cancel_callback)
 
 
+
+# Eager-bind browser helpers once human_sleep exists.
+try:
+    _browser_mod.bind(
+        get_registration_proxy=get_registration_proxy,
+        get_perf_flags=lambda: PERF_FLAGS,
+        human_sleep=human_sleep,
+    )
+except Exception:
+    pass
 
 def get_domains(api_key=None):
     headers = {}
@@ -1756,120 +1644,6 @@ def enable_nsfw_for_token(token, cf_clearance="", log_callback=None):
 
 
 SIGNUP_URL = "https://accounts.x.ai/sign-up?redirect=grok-com"
-
-_thread_ctx = threading.local()
-
-from tab_pool import TabPool
-
-
-def _get_browser():
-    return TabPool.get_browser()
-
-
-def _set_browser(value):
-    pass  # TabPool 管理 browser，外部 setter 为 no-op
-
-
-def _get_page():
-    if TabPool.get_browser() is None:
-        return None
-    return TabPool.get_tab()
-
-
-def _set_page(value):
-    pass  # TabPool 管理 tab，外部 setter 为 no-op
-
-
-def start_browser(log_callback=None):
-    last_exc = None
-    for attempt in range(1, 5):
-        try:
-            TabPool.init(create_browser_options, log_callback=log_callback)
-            page = TabPool.get_tab()
-            if log_callback and attempt > 1:
-                log_callback(f"[*] 浏览器第 {attempt} 次启动成功")
-            return TabPool.get_browser(), page
-        except Exception as exc:
-            last_exc = exc
-            if log_callback:
-                log_callback(f"[Debug] 浏览器启动失败(第{attempt}/4次): {exc}")
-            # 每线程独立浏览器，shutdown 只影响当前线程
-            try:
-                TabPool.release_tab()
-            except Exception:
-                pass
-            human_sleep(min(1.5 * attempt, 4))
-    raise Exception(f"浏览器启动失败，已重试4次: {last_exc}")
-
-
-def stop_browser():
-    """Quit current-thread Chromium (full process exit + del_data)."""
-    TabPool.release_tab()
-
-
-def prepare_browser_for_next_account(log_callback=None, force_recycle: bool = False):
-    """Between accounts: clear session (reuse) or full recycle.
-
-    Returns (browser, page).
-    """
-    reuse = bool(PERF_FLAGS.get("browser_reuse", True)) and not force_recycle
-    every = int(PERF_FLAGS.get("browser_recycle_every", 25) or 25)
-    served = TabPool.served_count()
-    if reuse and TabPool.get_browser() is not None and (every <= 0 or served < every):
-        if TabPool.clear_session(log_callback=log_callback):
-            TabPool.mark_served()
-            return TabPool.get_browser(), _get_page()
-    # full recycle
-    if log_callback:
-        log_callback(f"[*] 浏览器完整回收（reuse={reuse}, served={served}, every={every}）")
-    TabPool.release_tab()
-    return start_browser(log_callback=log_callback)
-
-
-def shutdown_browser():
-    """Quit all tracked Chromium instances."""
-    TabPool.shutdown()
-
-
-def restart_browser(log_callback=None):
-    TabPool.release_tab()
-    return start_browser(log_callback=log_callback)
-
-
-def sync_active_page():
-    """Re-bind the active tab handle without reloading (safe mid OTP/profile)."""
-    if TabPool.get_browser() is None:
-        restart_browser()
-        return _get_page()
-    try:
-        browser = TabPool.get_browser()
-        tabs = browser.tab_ids
-        if tabs:
-            browser.get_tab(tabs[-1])
-        else:
-            browser.new_tab()
-        TabPool.sync_tab()
-    except Exception:
-        pass
-    return _get_page()
-
-
-def refresh_active_page():
-    """Hard reload current tab. Avoid during OTP/profile — use sync_active_page()."""
-    if TabPool.get_browser() is None:
-        restart_browser()
-    try:
-        browser = TabPool.get_browser()
-        tabs = browser.tab_ids
-        if tabs:
-            page = browser.get_tab(tabs[-1])
-        else:
-            page = browser.new_tab()
-        page.refresh()
-        TabPool.sync_tab()
-    except Exception:
-        restart_browser()
-    return _get_page()
 
 
 def dismiss_cookie_banner(page=None, log_callback=None) -> str:
@@ -4264,8 +4038,16 @@ def main():
     root.mainloop()
 
 
-# Bind mail providers to this module's http/config helpers.
+# Bind mail providers / browser helpers to this module.
 providers.bind_host(sys.modules[__name__])
+try:
+    _browser_mod.bind(
+        get_registration_proxy=get_registration_proxy,
+        get_perf_flags=lambda: PERF_FLAGS,
+        human_sleep=human_sleep,
+    )
+except Exception:
+    pass
 
 if __name__ == "__main__":
     main()
