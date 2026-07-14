@@ -24,6 +24,7 @@ import random
 import re
 import string
 import json
+import logging
 
 from DrissionPage import ChromiumOptions
 from DrissionPage.errors import PageDisconnectedError
@@ -72,11 +73,7 @@ from config_runtime import (
 
 # Config lives in config_runtime; keep mutable `config` identity for legacy callers.
 config = _cfg.config
-_cf_domain_index = 0
-# CloudMail 公开 token 单例（多线程共享，避免并发覆盖）
-_cloudmail_public_token = None
-_cloudmail_public_token_lock = threading.Lock()
-_hotmail_bridge_module = None
+logger = logging.getLogger("grok_sulfide.ttk")
 
 
 
@@ -89,13 +86,22 @@ _email_track_lock = _store._email_track_lock
 
 def _sync_store_hooks():
     """Point store side-channel hooks at hotmail bridge when loaded."""
+    def _bridge_mod():
+        try:
+            from providers import hotmail as hm
+            return getattr(hm, "_hotmail_bridge_module", None)
+        except Exception:
+            return None
+
     def _used(email, password=""):
-        if _hotmail_bridge_module is not None and hasattr(_hotmail_bridge_module, "mark_used"):
-            _hotmail_bridge_module.mark_used(email, password)
+        mod = _bridge_mod()
+        if mod is not None and hasattr(mod, "mark_used"):
+            mod.mark_used(email, password)
 
     def _err(email, password="", reason=""):
-        if _hotmail_bridge_module is not None and hasattr(_hotmail_bridge_module, "mark_error"):
-            _hotmail_bridge_module.mark_error(email, password, reason)
+        mod = _bridge_mod()
+        if mod is not None and hasattr(mod, "mark_error"):
+            mod.mark_error(email, password, reason)
 
     _store.set_ledger_hooks(mark_used_hook=_used, mark_error_hook=_err)
 
@@ -234,7 +240,7 @@ def raise_if_otp_rate_limited(email: str = "", page=None, log_callback=None):
     try:
         mark_error(email, reason=f"otp_send_rate_limit:{hit[:80]}")
     except Exception:
-        pass
+        logger.debug("suppressed exception", exc_info=True)
     raise EmailOtpRateLimitedError(
         email, f"xAI 验证码发送过多，请稍后重试 ({hit}): {email}"
     )
@@ -429,8 +435,6 @@ EXTENSION_PATH = os.path.abspath(
 )
 
 
-DUCKMAIL_API_BASE = "https://api.duckmail.sbs"
-
 
 def get_proxies():
     proxy = get_registration_proxy()
@@ -491,109 +495,6 @@ def begin_registration_proxy_session(label=""):
     _registration_proxy_tls.proxy = runtime_proxy
     _registration_proxy_tls.account = account
     return account
-
-
-def get_duckmail_api_key():
-    return config.get("duckmail_api_key", "")
-
-
-def get_cloudflare_api_base():
-    return str(config.get("cloudflare_api_base", "") or "").rstrip("/")
-
-
-def get_cloudflare_api_key():
-    return config.get("cloudflare_api_key", "")
-
-
-def get_cloudflare_auth_mode():
-    return str(config.get("cloudflare_auth_mode", "bearer") or "bearer").lower()
-
-
-def get_cloudflare_path(key, default_path):
-    raw = str(config.get(key, default_path) or default_path).strip()
-    if not raw.startswith("/"):
-        raw = "/" + raw
-    return raw
-
-
-def cloudflare_build_headers(content_type=False):
-    headers = {"Content-Type": "application/json"} if content_type else {}
-    key = get_cloudflare_api_key()
-    mode = get_cloudflare_auth_mode()
-    if key:
-        if mode == "x-api-key":
-            headers["X-API-Key"] = key
-        elif mode == "x-custom-auth":
-            headers["x-custom-auth"] = key
-        elif mode == "x-admin-auth":
-            headers["x-admin-auth"] = key
-        elif mode != "none":
-            headers["Authorization"] = f"Bearer {key}"
-    return headers
-
-
-def cloudflare_apply_auth_params(params=None):
-    merged = dict(params or {})
-    key = get_cloudflare_api_key()
-    mode = get_cloudflare_auth_mode()
-    if key and mode == "query-key":
-        merged["key"] = key
-    return merged
-
-
-def _pick_list_payload(data):
-    if isinstance(data, list):
-        return data
-    if isinstance(data, dict):
-        if isinstance(data.get("results"), list):
-            return data.get("results")
-        if isinstance(data.get("hydra:member"), list):
-            return data.get("hydra:member")
-        if isinstance(data.get("data"), list):
-            return data.get("data")
-        if isinstance(data.get("messages"), list):
-            return data.get("messages")
-        if isinstance(data.get("data"), dict):
-            nested = data.get("data")
-            if isinstance(nested.get("messages"), list):
-                return nested.get("messages")
-    return []
-
-
-def cloudflare_create_temp_address(api_base):
-    """适配 cloudflare_temp_email: POST new_address -> {address,jwt}."""
-    global _cf_domain_index
-    path = get_cloudflare_path("cloudflare_path_accounts", "/api/new_address")
-    url = f"{api_base}{path}"
-    payload = {}
-    try:
-        # 在多个域名之间轮换，降低单域偶发不收件导致的失败率
-        domains = [x.strip() for x in re.split(r"[,，\s]+", str(config.get("defaultDomains", "") or "")) if x.strip()]
-        if domains:
-            payload["domain"] = domains[_cf_domain_index % len(domains)]
-            _cf_domain_index += 1
-            if path.startswith("/admin/"):
-                payload["name"] = generate_username(10)
-    except Exception:
-        pass
-    if path.startswith("/admin/") and not payload.get("domain"):
-        raise Exception("Cloudflare 管理员创建邮箱需要在 defaultDomains 中配置可用域名")
-    resp = http_post(
-        url,
-        json=payload,
-        headers=cloudflare_build_headers(content_type=True),
-        params=cloudflare_apply_auth_params(),
-    )
-    resp.raise_for_status()
-    try:
-        data = resp.json()
-    except Exception:
-        raise Exception(f"Cloudflare /api/new_address 返回非JSON: {resp.text[:300]}")
-    address = data.get("address")
-    jwt = data.get("jwt")
-    if not address or not jwt:
-        raise Exception(f"Cloudflare /api/new_address 缺少 address/jwt: {data}")
-    return address, jwt
 
 
 def get_user_agent():
@@ -844,555 +745,12 @@ try:
         human_sleep=human_sleep,
     )
 except Exception:
-    pass
-
-def get_domains(api_key=None):
-    headers = {}
-    key = api_key or get_duckmail_api_key()
-    if key:
-        headers["Authorization"] = f"Bearer {key}"
-    resp = http_get(f"{DUCKMAIL_API_BASE}/domains", headers=headers)
-    resp.raise_for_status()
-    return resp.json().get("hydra:member", [])
-
-
-def create_account(address, password, api_key=None, expires_in=0):
-    headers = {"Content-Type": "application/json"}
-    key = api_key or get_duckmail_api_key()
-    if key:
-        headers["Authorization"] = f"Bearer {key}"
-    data = {"address": address, "password": password, "expiresIn": expires_in}
-    resp = http_post(f"{DUCKMAIL_API_BASE}/accounts", json=data, headers=headers)
-    resp.raise_for_status()
-    return resp.json()
-
-
-def get_token(address, password):
-    data = {"address": address, "password": password}
-    resp = http_post(f"{DUCKMAIL_API_BASE}/token", json=data)
-    resp.raise_for_status()
-    return resp.json().get("token")
-
-
-def get_messages(token):
-    headers = {"Authorization": f"Bearer {token}"}
-    resp = http_get(f"{DUCKMAIL_API_BASE}/messages", headers=headers)
-    resp.raise_for_status()
-    return resp.json().get("hydra:member", [])
-
-
-def get_message_detail(token, message_id):
-    headers = {"Authorization": f"Bearer {token}"}
-    resp = http_get(f"{DUCKMAIL_API_BASE}/messages/{message_id}", headers=headers)
-    resp.raise_for_status()
-    return resp.json()
-
-
-def cloudflare_get_domains(api_base, api_key=None):
-    headers = cloudflare_build_headers(content_type=False)
-    if api_key and "Authorization" in headers:
-        headers["Authorization"] = f"Bearer {api_key}"
-    if api_key and "X-API-Key" in headers:
-        headers["X-API-Key"] = api_key
-    path = get_cloudflare_path("cloudflare_path_domains", "/domains")
-    params = cloudflare_apply_auth_params()
-    resp = http_get(f"{api_base}{path}", headers=headers, params=params)
-    resp.raise_for_status()
-    return _pick_list_payload(resp.json())
-
-
-def cloudflare_create_account(api_base, address, password, api_key=None, expires_in=0):
-    headers = cloudflare_build_headers(content_type=True)
-    if api_key and "Authorization" in headers:
-        headers["Authorization"] = f"Bearer {api_key}"
-    if api_key and "X-API-Key" in headers:
-        headers["X-API-Key"] = api_key
-    payload = {"address": address, "password": password, "expiresIn": expires_in}
-    path = get_cloudflare_path("cloudflare_path_accounts", "/accounts")
-    params = cloudflare_apply_auth_params()
-    resp = http_post(f"{api_base}{path}", json=payload, headers=headers, params=params)
-    resp.raise_for_status()
-    return resp.json()
-
-
-def cloudflare_get_token(api_base, address, password, api_key=None):
-    headers = cloudflare_build_headers(content_type=True)
-    if api_key and "Authorization" in headers:
-        headers["Authorization"] = f"Bearer {api_key}"
-    if api_key and "X-API-Key" in headers:
-        headers["X-API-Key"] = api_key
-    path = get_cloudflare_path("cloudflare_path_token", "/token")
-    resp = http_post(
-        f"{api_base}{path}",
-        json={"address": address, "password": password},
-        headers=headers,
-        params=cloudflare_apply_auth_params(),
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    if isinstance(data, dict):
-        if data.get("token"):
-            return data.get("token")
-        if isinstance(data.get("data"), dict) and data["data"].get("token"):
-            return data["data"].get("token")
-    return None
-
-
-def cloudflare_get_messages(api_base, token):
-    headers = {"Authorization": f"Bearer {token}"}
-    path = get_cloudflare_path("cloudflare_path_messages", "/messages")
-    params = {"limit": 20, "offset": 0}
-    params = cloudflare_apply_auth_params(params)
-    resp = http_get(f"{api_base}{path}", headers=headers, params=params)
-    resp.raise_for_status()
-    try:
-        data = resp.json()
-    except Exception:
-        raise Exception(f"Cloudflare messages 返回非JSON: {resp.text[:300]}")
-    return _pick_list_payload(data)
-
-
-def cloudflare_get_message_detail(api_base, token, message_id):
-    headers = {"Authorization": f"Bearer {token}"}
-    candidates = [
-        f"{api_base}/api/mail/{message_id}",
-        f"{api_base}{get_cloudflare_path('cloudflare_path_messages', '/messages')}/{message_id}",
-    ]
-    last_err = None
-    for url in candidates:
-        try:
-            resp = http_get(
-                url,
-                headers=headers,
-                params=cloudflare_apply_auth_params(),
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            if isinstance(data, dict) and isinstance(data.get("data"), dict):
-                return data["data"]
-            return data
-        except Exception as exc:
-            last_err = exc
-            continue
-    raise Exception(f"Cloudflare 获取邮件详情失败: {last_err}")
-
-
-YYDS_API_BASE = "https://maliapi.215.im/v1"
-
-
-def get_yyds_api_key():
-    return config.get("yyds_api_key", "")
-
-
-def get_yyds_jwt():
-    return config.get("yyds_jwt", "")
-
-
-def yyds_get_domains(api_key=None, jwt=None):
-    key = api_key or get_yyds_api_key()
-    token = jwt or get_yyds_jwt()
-    headers = {}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    elif key:
-        headers["X-API-Key"] = key
-    resp = http_get(f"{YYDS_API_BASE}/domains", headers=headers)
-    resp.raise_for_status()
-    data = resp.json()
-    return data.get("data", []) if data.get("success") else []
-
-
-def yyds_create_account(address=None, domain=None, api_key=None, jwt=None):
-    key = api_key or get_yyds_api_key()
-    token = jwt or get_yyds_jwt()
-    headers = {"Content-Type": "application/json"}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    elif key:
-        headers["X-API-Key"] = key
-    payload = {}
-    if address:
-        payload["address"] = address
-    if domain:
-        payload["domain"] = domain
-    elif key or token:
-        payload["autoDomainStrategy"] = "prefer_owned"
-    resp = http_post(f"{YYDS_API_BASE}/accounts", json=payload, headers=headers)
-    resp.raise_for_status()
-    data = resp.json()
-    if data.get("success"):
-        return data.get("data", {})
-    raise Exception(f"YYDS 创建邮箱失败: {data}")
-
-
-def yyds_get_token(address, api_key=None, jwt=None):
-    key = api_key or get_yyds_api_key()
-    token = jwt or get_yyds_jwt()
-    headers = {"Content-Type": "application/json"}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    elif key:
-        headers["X-API-Key"] = key
-    resp = http_post(
-        f"{YYDS_API_BASE}/token", json={"address": address}, headers=headers
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    if data.get("success"):
-        return data.get("data", {}).get("token")
-    raise Exception(f"YYDS 获取token失败: {data}")
-
-
-def yyds_get_messages(address, token=None, api_key=None, jwt=None):
-    key = api_key or get_yyds_api_key()
-    temp_token = token or jwt or get_yyds_jwt()
-    headers = {}
-    if temp_token:
-        headers["Authorization"] = f"Bearer {temp_token}"
-    elif key:
-        headers["X-API-Key"] = key
-    resp = http_get(
-        f"{YYDS_API_BASE}/messages",
-        params={"address": address},
-        headers=headers,
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    if data.get("success"):
-        return data.get("data", {}).get("messages", [])
-    return []
-
-
-def yyds_get_message_detail(message_id, token=None, api_key=None, jwt=None):
-    key = api_key or get_yyds_api_key()
-    temp_token = token or jwt or get_yyds_jwt()
-    headers = {}
-    if temp_token:
-        headers["Authorization"] = f"Bearer {temp_token}"
-    elif key:
-        headers["X-API-Key"] = key
-    resp = http_get(f"{YYDS_API_BASE}/messages/{message_id}", headers=headers)
-    resp.raise_for_status()
-    data = resp.json()
-    if data.get("success"):
-        return data.get("data", {})
-    raise Exception(f"YYDS 获取邮件详情失败: {data}")
-
-
-def yyds_generate_username(length=10):
-    chars = string.ascii_lowercase + string.digits
-    return "".join(secrets.choice(chars) for _ in range(length))
-
-
-def yyds_pick_domain(api_key=None, jwt=None):
-    domains = yyds_get_domains(api_key=api_key, jwt=jwt)
-    if not domains:
-        raise Exception("YYDS 没有返回任何可用域名")
-    private = [d for d in domains if d.get("isVerified") and not d.get("isPublic")]
-    if private:
-        return private[0]["domain"]
-    public = [d for d in domains if d.get("isVerified") and d.get("isPublic")]
-    if public:
-        return public[0]["domain"]
-    verified = [d for d in domains if d.get("isVerified")]
-    if verified:
-        return verified[0]["domain"]
-    raise Exception("YYDS 无已验证域名可用")
-
-
-def yyds_get_email_and_token(api_key=None, jwt=None):
-    key = api_key or get_yyds_api_key()
-    token = jwt or get_yyds_jwt()
-    if not token and not key:
-        raise Exception("YYDS API Key 或 JWT 未配置")
-    domain = yyds_pick_domain(api_key=key, jwt=token)
-    username = yyds_generate_username(10)
-    result = yyds_create_account(
-        address=username, domain=domain, api_key=key, jwt=token
-    )
-    address = result.get("address") or f"{username}@{domain}"
-    temp_token = result.get("token")
-    if not temp_token:
-        temp_token = yyds_get_token(address, api_key=key, jwt=token)
-    if not temp_token:
-        raise Exception("获取 YYDS token 失败")
-    print(f"[*] 已创建 YYDS 邮箱: {address}")
-    return address, temp_token
-
-
-def yyds_get_oai_code(
-    token,
-    address,
-    timeout=180,
-    poll_interval=3,
-    log_callback=None,
-    jwt=None,
-    cancel_callback=None,
-):
-    deadline = time.time() + timeout
-    seen_ids = set()
-    while time.time() < deadline:
-        raise_if_cancelled(cancel_callback)
-        try:
-            messages = yyds_get_messages(address, token=token, jwt=jwt)
-        except Exception as exc:
-            if log_callback:
-                log_callback(f"[Debug] YYDS 拉取邮件列表失败: {exc}")
-            sleep_with_cancel(poll_interval, cancel_callback)
-            continue
-        for msg in messages:
-            msg_id = msg.get("id")
-            if not msg_id or msg_id in seen_ids:
-                continue
-            seen_ids.add(msg_id)
-            to_addrs = [t.get("address", "").lower() for t in (msg.get("to") or [])]
-            if address.lower() not in to_addrs:
-                continue
-            try:
-                detail = yyds_get_message_detail(msg_id, token=token, jwt=jwt)
-            except Exception as exc:
-                if log_callback:
-                    log_callback(f"[Debug] YYDS 获取邮件详情失败: {exc}")
-                continue
-            parts = []
-            text_body = detail.get("text") or ""
-            if text_body:
-                parts.append(text_body)
-            html_list = detail.get("html") or []
-            for h in html_list:
-                parts.append(re.sub(r"<[^>]+>", " ", h))
-            combined = "\n".join(parts)
-            subject = detail.get("subject", "")
-            if log_callback:
-                log_callback(f"[Debug] YYDS 收到邮件: {subject}")
-            code = extract_verification_code(combined, subject)
-            if code:
-                if log_callback:
-                    log_callback(f"[*] YYDS 从邮件中提取到验证码: {code}")
-                return code
-        sleep_with_cancel(poll_interval, cancel_callback)
-    raise Exception(f"YYDS 在 {timeout}s 内未收到验证码邮件")
+    logger.debug("suppressed exception", exc_info=True)
 
 
 def generate_username(length=10):
     return _providers_generate_username(length)
 
-
-def pick_domain(api_key=None):
-    domains = get_domains(api_key=api_key)
-    if not domains:
-        raise Exception("DuckMail 没有返回任何可用域名")
-    private = [d for d in domains if d.get("ownerId")]
-    verified_private = [d for d in private if d.get("isVerified")]
-    if verified_private:
-        return verified_private[0]["domain"]
-    public = [d for d in domains if d.get("isVerified")]
-    if public:
-        return public[0]["domain"]
-    raise Exception("DuckMail 无已验证域名可用")
-
-
-# ──────────────────────── CloudMail (maillab/cloud-mail) ────────────────────────
-# API 前缀: /api/（所有接口均挂载在 /api/ 下）
-# 认证格式: Authorization: <token>（不带 Bearer 前缀）
-# 公开 token 通过 /api/public/genToken 获取（需管理员账号）
-
-def get_cloudmail_url():
-    return str(os.environ.get("CLOUDMAIL_URL") or config.get("cloudmail_url", "") or "").rstrip("/")
-
-
-def get_cloudmail_password():
-    return os.environ.get("CLOUDMAIL_PASSWORD") or config.get("cloudmail_password", "")
-
-
-def get_cloudmail_admin_email():
-    return str(os.environ.get("CLOUDMAIL_ADMIN_EMAIL") or config.get("cloudmail_admin_email", "") or "").strip()
-
-
-def cloudmail_login(url, email, password):
-    """POST /api/login -> JWT string"""
-    resp = http_post(
-        f"{url}/api/login",
-        json={"email": email, "password": password},
-        headers={"Content-Type": "application/json"},
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    if isinstance(data, dict) and data.get("code") == 200:
-        token_data = data.get("data", {})
-        if isinstance(token_data, dict):
-            jwt = token_data.get("token")
-            if jwt:
-                return jwt
-    raise Exception(f"CloudMail 登录失败: {str(data)[:200]}")
-
-
-def cloudmail_register(url, email, password, turnstile_token=""):
-    """POST /api/register -> 注册用户+账号"""
-    payload = {"email": email, "password": password}
-    if turnstile_token:
-        payload["token"] = turnstile_token
-    resp = http_post(
-        f"{url}/api/register",
-        json=payload,
-        headers={"Content-Type": "application/json"},
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    if isinstance(data, dict) and data.get("code") != 200:
-        raise Exception(f"CloudMail 注册失败: {data.get('message', str(data))}")
-    return data
-
-
-def cloudmail_gen_public_token(url, admin_email, admin_password):
-    """POST /api/public/genToken -> 公开 API token (UUID)"""
-    resp = http_post(
-        f"{url}/api/public/genToken",
-        json={"email": admin_email, "password": admin_password},
-        headers={"Content-Type": "application/json"},
-        proxies={},
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    if isinstance(data, dict) and data.get("code") == 200:
-        token_data = data.get("data", {})
-        if isinstance(token_data, dict):
-            return token_data.get("token")
-    raise Exception(f"CloudMail 获取公开 token 失败: {str(data)[:200]}")
-
-
-def cloudmail_public_email_list(url, public_token, to_email="", size=20):
-    """POST /api/public/emailList -> 公开邮件查询（需公开 token，Authorization: <token>）"""
-    payload = {"size": size}
-    if to_email:
-        payload["toEmail"] = to_email
-    resp = http_post(
-        f"{url}/api/public/emailList",
-        json=payload,
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": public_token,
-        },
-        proxies={},
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    if isinstance(data, dict):
-        if data.get("code") == 200:
-            return data.get("data", [])
-        raise Exception(f"CloudMail 邮件查询失败: {data.get('message', str(data))}")
-    return []
-
-
-def _cloudmail_get_shared_token(force_refresh=False):
-    """获取或刷新共享的公开 token（线程安全单例）"""
-    global _cloudmail_public_token
-    with _cloudmail_public_token_lock:
-        if _cloudmail_public_token and not force_refresh:
-            return _cloudmail_public_token
-        url = get_cloudmail_url()
-        admin_email = get_cloudmail_admin_email()
-        admin_password = get_cloudmail_password()
-        if not url or not admin_email or not admin_password:
-            raise Exception("CloudMail 配置不完整")
-        token = cloudmail_gen_public_token(url, admin_email, admin_password)
-        if not token:
-            raise Exception("CloudMail 公开 token 为空")
-        _cloudmail_public_token = token
-        return token
-
-
-def cloudmail_get_oai_code(
-    dev_token,
-    email,
-    timeout=300,
-    poll_interval=None,
-    log_callback=None,
-    cancel_callback=None,
-    resend_callback=None,
-):
-    # 使用配置的 mail_poll_interval，默认 0.3s
-    if poll_interval is None:
-        poll_interval = max(0.1, float(config.get("mail_poll_interval", 0.3) or 0.3))
-    url = get_cloudmail_url()
-    if not url:
-        raise Exception("CloudMail URL 未配置")
-    # 获取共享公开 token（所有线程共用同一个，避免并发覆盖）
-    try:
-        public_token = _cloudmail_get_shared_token()
-    except Exception as exc:
-        raise Exception(f"CloudMail 获取公开 token 失败: {exc}")
-    if log_callback:
-        log_callback("[Debug] CloudMail 公开 token 获取成功")
-    deadline = time.time() + timeout
-    seen_attempts = {}
-    next_resend_at = time.time() + 60
-    while time.time() < deadline:
-        raise_if_cancelled(cancel_callback)
-        if resend_callback and time.time() >= next_resend_at:
-            try:
-                resend_callback()
-                if log_callback:
-                    log_callback("[*] 已触发重新发送验证码")
-            except Exception as exc:
-                if log_callback:
-                    log_callback(f"[Debug] 触发重发验证码失败: {exc}")
-            next_resend_at = time.time() + 60
-        # 统一使用 poll_interval（0.3s 短轮询，无需前加速）
-        current_interval = poll_interval
-        # 用完整邮箱地址查询（公开 API 的 toEmail 需要完整地址）
-        try:
-            messages = cloudmail_public_email_list(url, public_token, to_email=email, size=20)
-        except Exception as exc:
-            err_msg = str(exc)
-            if log_callback:
-                log_callback(f"[Debug] CloudMail 邮件查询失败: {err_msg}")
-            # token 失效时，刷新共享 token（加锁，多线程只刷新一次）
-            if "token" in err_msg.lower() or "401" in err_msg:
-                try:
-                    public_token = _cloudmail_get_shared_token(force_refresh=True)
-                    if log_callback:
-                        log_callback("[Debug] CloudMail 公开 token 已刷新")
-                except Exception:
-                    pass
-            sleep_with_cancel(current_interval, cancel_callback)
-            continue
-        if log_callback:
-            log_callback(f"[Debug] CloudMail 本轮邮件数量: {len(messages)}")
-        for msg in messages:
-            msg_id = msg.get("emailId") or msg.get("id") or msg.get("messageId")
-            if not msg_id:
-                continue
-            attempt = int(seen_attempts.get(msg_id, 0))
-            if attempt >= 5:
-                continue
-            seen_attempts[msg_id] = attempt + 1
-            # 提取邮件内容（公开接口返回 content 字段，为完整 HTML）
-            parts = []
-            for field in ("content", "text", "textContent", "text_content", "body", "snippet", "intro"):
-                value = msg.get(field)
-                if isinstance(value, str) and value.strip():
-                    parts.append(value)
-            html_val = msg.get("html") or msg.get("htmlContent") or msg.get("html_content")
-            if isinstance(html_val, str):
-                parts.append(re.sub(r"<[^>]+>", " ", html_val))
-            elif isinstance(html_val, list):
-                for h in html_val:
-                    if isinstance(h, str):
-                        parts.append(re.sub(r"<[^>]+>", " ", h))
-            subject = str(msg.get("subject", "") or "")
-            combined = "\n".join(parts)
-            if log_callback:
-                log_callback(f"[Debug] CloudMail 收到邮件: {subject}")
-            code = extract_verification_code(combined, subject)
-            if code:
-                if log_callback:
-                    log_callback(f"[*] CloudMail 从邮件中提取到验证码: {code}")
-                return code
-            elif log_callback:
-                log_callback(f"[Debug] 邮件已解析但未提取到验证码 id={msg_id} attempt={seen_attempts[msg_id]}")
-        sleep_with_cancel(current_interval, cancel_callback)
-    raise Exception(f"CloudMail 在 {timeout}s 内未收到验证码邮件")
 
 
 # ──────────────────────── 公共邮箱工具 ────────────────────────
@@ -1402,22 +760,9 @@ def get_email_provider():
 
 
 def _hotmail_bridge():
-    """Load the Hotmail provider bundled with this project."""
-    global _hotmail_bridge_module
-    if _hotmail_bridge_module is None:
-        import hotmail_provider
-
-        _hotmail_bridge_module = hotmail_provider
-        _sync_store_hooks()
-    _hotmail_bridge_module.configure(
-        config,
-        is_email_used=is_email_used,
-        http_post=http_post,
-        extract_verification_code=extract_verification_code,
-        raise_if_cancelled=raise_if_cancelled,
-        sleep_with_cancel=sleep_with_cancel,
-    )
-    return _hotmail_bridge_module
+    """Back-compat: hotmail bridge lives in providers.hotmail."""
+    from providers.hotmail import _hotmail_bridge as _impl
+    return _impl()
 
 
 def get_email_and_token(api_key=None):
@@ -1464,158 +809,6 @@ def extract_verification_code(text, subject=""):
         if match:
             return match.group(1)
     return None
-
-
-def duckmail_get_oai_code(
-    dev_token,
-    email,
-    timeout=180,
-    poll_interval=3,
-    log_callback=None,
-    cancel_callback=None,
-):
-    deadline = time.time() + timeout
-    seen_ids = set()
-    while time.time() < deadline:
-        raise_if_cancelled(cancel_callback)
-        try:
-            messages = get_messages(dev_token)
-        except Exception as exc:
-            if log_callback:
-                log_callback(f"[Debug] 拉取邮件列表失败: {exc}")
-            sleep_with_cancel(poll_interval, cancel_callback)
-            continue
-        for msg in messages:
-            msg_id = msg.get("id") or msg.get("msgid")
-            if not msg_id or msg_id in seen_ids:
-                continue
-            seen_ids.add(msg_id)
-            recipients = [t.get("address", "").lower() for t in (msg.get("to") or [])]
-            if email.lower() not in recipients:
-                continue
-            try:
-                detail = get_message_detail(dev_token, msg_id)
-            except Exception as exc:
-                if log_callback:
-                    log_callback(f"[Debug] 获取邮件详情失败: {exc}")
-                continue
-            parts = []
-            text_body = detail.get("text") or ""
-            if text_body:
-                parts.append(text_body)
-            html_list = detail.get("html") or []
-            for h in html_list:
-                parts.append(re.sub(r"<[^>]+>", " ", h))
-            combined = "\n".join(parts)
-            subject = detail.get("subject", "")
-            if log_callback:
-                log_callback(f"[Debug] 收到邮件: {subject}")
-            code = extract_verification_code(combined, subject)
-            if code:
-                if log_callback:
-                    log_callback(f"[*] 从邮件中提取到验证码: {code}")
-                return code
-        sleep_with_cancel(poll_interval, cancel_callback)
-    raise Exception(f"在 {timeout}s 内未收到验证码邮件")
-
-
-def cloudflare_get_oai_code(
-    dev_token,
-    email,
-    timeout=180,
-    poll_interval=3,
-    log_callback=None,
-    cancel_callback=None,
-    resend_callback=None,
-):
-    api_base = get_cloudflare_api_base()
-    if not api_base:
-        raise Exception("Cloudflare API Base 未配置")
-    deadline = time.time() + timeout
-    # 同一封邮件正文可能延迟可读，允许多次重试解析，避免偶发漏码
-    seen_attempts = {}
-    next_resend_at = time.time() + 35
-    while time.time() < deadline:
-        raise_if_cancelled(cancel_callback)
-        if resend_callback and time.time() >= next_resend_at:
-            try:
-                resend_callback()
-                if log_callback:
-                    log_callback("[*] 已触发重新发送验证码")
-            except Exception as exc:
-                if log_callback:
-                    log_callback(f"[Debug] 触发重发验证码失败: {exc}")
-            next_resend_at = time.time() + 35
-        try:
-            messages = cloudflare_get_messages(api_base, dev_token)
-        except Exception as exc:
-            if log_callback:
-                log_callback(f"[Debug] Cloudflare 拉取邮件列表失败: {exc}")
-            sleep_with_cancel(poll_interval, cancel_callback)
-            continue
-        if log_callback:
-            log_callback(f"[Debug] Cloudflare 本轮邮件数量: {len(messages)}")
-
-        for msg in messages:
-            msg_id = msg.get("id") or msg.get("msgid")
-            if not msg_id:
-                continue
-            attempt = int(seen_attempts.get(msg_id, 0))
-            if attempt >= 5:
-                continue
-            seen_attempts[msg_id] = attempt + 1
-            recipients = [t.get("address", "").lower() for t in (msg.get("to") or [])]
-            msg_addr = str(msg.get("address", "")).lower()
-            # 优先匹配目标邮箱；若结构不一致也允许继续解析，避免接口字段漂移导致漏码
-            address_matched = True
-            if recipients:
-                address_matched = email.lower() in recipients
-            elif msg_addr:
-                address_matched = msg_addr == email.lower()
-            if not address_matched and log_callback:
-                log_callback(f"[Debug] 跳过疑似非目标邮件 id={msg_id} address={msg_addr} to={recipients}")
-                continue
-            parts = []
-            # 先直接从列表项取内容，避免 detail 接口差异导致漏码
-            for field in ("text", "raw", "content", "intro", "body", "snippet"):
-                value = msg.get(field)
-                if isinstance(value, str) and value.strip():
-                    parts.append(value)
-            html_list = msg.get("html") or []
-            if isinstance(html_list, str):
-                html_list = [html_list]
-            for h in html_list:
-                parts.append(re.sub(r"<[^>]+>", " ", h))
-            subject = str(msg.get("subject", "") or "")
-            combined = "\n".join(parts)
-            # 再尝试 detail 接口补全内容
-            try:
-                detail = cloudflare_get_message_detail(api_base, dev_token, msg_id)
-                for field in ("text", "raw", "content", "intro", "body", "snippet"):
-                    value = detail.get(field)
-                    if isinstance(value, str) and value.strip():
-                        combined += "\n" + value
-                html_list2 = detail.get("html") or []
-                if isinstance(html_list2, str):
-                    html_list2 = [html_list2]
-                for h in html_list2:
-                    combined += "\n" + re.sub(r"<[^>]+>", " ", h)
-                if not subject:
-                    subject = str(detail.get("subject", "") or "")
-            except Exception as exc:
-                if log_callback:
-                    log_callback(f"[Debug] Cloudflare detail接口失败，改用列表内容解析: {exc}")
-            if log_callback:
-                log_callback(f"[Debug] Cloudflare 收到邮件: {subject}")
-            code = extract_verification_code(combined, subject)
-            if code:
-                if log_callback:
-                    log_callback(f"[*] Cloudflare 从邮件中提取到验证码: {code}")
-                return code
-            elif log_callback:
-                log_callback(f"[Debug] 邮件已解析但未提取到验证码 id={msg_id} attempt={seen_attempts[msg_id]}")
-        sleep_with_cancel(poll_interval, cancel_callback)
-    raise Exception(f"Cloudflare 在 {timeout}s 内未收到验证码邮件")
 
 
 def enable_nsfw_for_token(token, cf_clearance="", log_callback=None):
@@ -2179,7 +1372,7 @@ return false;
                     )
                     human_sleep(1.0, cancel_callback)
                 except Exception:
-                    pass
+                    logger.debug("suppressed exception", exc_info=True)
                 if page_on_signup_chooser(page) or not page_still_on_email_form(page):
                     try:
                         click_email_signup_button(
@@ -2188,7 +1381,7 @@ return false;
                             cancel_callback=cancel_callback,
                         )
                     except Exception:
-                        pass
+                        logger.debug("suppressed exception", exc_info=True)
                 human_sleep(0.5, cancel_callback)
                 continue
             raise Exception(f"邮箱提交后未进入验证码页（表单卡住）: {email}")
@@ -2267,11 +1460,11 @@ def _fill_otp_via_drission(page, clean_code, log_callback=None):
             try:
                 ele.clear()
             except Exception:
-                pass
+                logger.debug("suppressed exception", exc_info=True)
             try:
                 ele.click()
             except Exception:
-                pass
+                logger.debug("suppressed exception", exc_info=True)
             try:
                 ele.input(clean_code, clear=True)
             except TypeError:
@@ -2282,7 +1475,7 @@ def _fill_otp_via_drission(page, clean_code, log_callback=None):
                 try:
                     ele.input("\n")
                 except Exception:
-                    pass
+                    logger.debug("suppressed exception", exc_info=True)
             val = str(ele.value or ele.attr("value") or "").replace(" ", "").strip()
             if val and (clean_code in val or val in clean_code or len(val) >= min(4, len(clean_code))):
                 if log_callback:
@@ -2301,11 +1494,11 @@ def _fill_otp_via_drission(page, clean_code, log_callback=None):
                 try:
                     box.click()
                 except Exception:
-                    pass
+                    logger.debug("suppressed exception", exc_info=True)
                 try:
                     box.clear()
                 except Exception:
-                    pass
+                    logger.debug("suppressed exception", exc_info=True)
                 try:
                     box.input(ch, clear=True)
                 except TypeError:
@@ -2313,7 +1506,7 @@ def _fill_otp_via_drission(page, clean_code, log_callback=None):
             try:
                 boxes[min(len(clean_code), len(boxes)) - 1].input("\n")
             except Exception:
-                pass
+                logger.debug("suppressed exception", exc_info=True)
             if log_callback:
                 log_callback(f"[*] Drission 写入验证码: {len(clean_code)} boxes")
             return "dp-boxes"
@@ -2597,7 +1790,7 @@ def getTurnstileToken(log_callback=None, cancel_callback=None):
             "try { if (window.turnstile && typeof turnstile.reset === 'function') turnstile.reset(); } catch(e) {}"
         )
     except Exception:
-        pass
+        logger.debug("suppressed exception", exc_info=True)
 
     for _ in range(0, 20):
         raise_if_cancelled(cancel_callback)
@@ -2641,14 +1834,14 @@ Object.defineProperty(MouseEvent.prototype, 'screenY', { value: sy });
                             """
                         )
                     except Exception:
-                        pass
+                        logger.debug("suppressed exception", exc_info=True)
                     try:
                         body_sr = iframe.ele("tag:body").shadow_root
                         btn = body_sr.ele("tag:input")
                         if btn:
                             btn.click()
                     except Exception:
-                        pass
+                        logger.debug("suppressed exception", exc_info=True)
             else:
                 # 兜底：尝试触发页面上可见的 Turnstile 容器
                 page.run_js(
@@ -2661,7 +1854,7 @@ if (nodes.length && typeof nodes[0].click === 'function') nodes[0].click();
                     """
                 )
         except Exception:
-            pass
+            logger.debug("suppressed exception", exc_info=True)
         human_sleep(1, cancel_callback)
 
     raise Exception("Turnstile 获取 token 失败")
@@ -3161,7 +2354,7 @@ return String(cfInput.value || '').trim().length;
         except PageDisconnectedError:
             refresh_active_page()
         except Exception:
-            pass
+            logger.debug("suppressed exception", exc_info=True)
 
         human_sleep(1, cancel_callback)
 
@@ -3724,7 +2917,7 @@ class GrokRegisterGUI:
             try:
                 win.destroy()
             except Exception:
-                pass
+                logger.debug("suppressed exception", exc_info=True)
 
         close_btn = ttk.Button(footer, text="关闭", command=on_close)
         close_btn.pack(side=tk.RIGHT, padx=5)
@@ -4047,7 +3240,7 @@ try:
         human_sleep=human_sleep,
     )
 except Exception:
-    pass
+    logger.debug("suppressed exception", exc_info=True)
 
 if __name__ == "__main__":
     main()

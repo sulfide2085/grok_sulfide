@@ -1,6 +1,7 @@
 """Browser lifecycle helpers (TabPool wrappers + Chromium options)."""
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any, Callable
 from urllib.parse import urlparse
@@ -9,6 +10,8 @@ from DrissionPage import ChromiumOptions
 
 from proxy_bridge import start_authenticated_proxy_bridge
 from tab_pool import TabPool
+
+logger = logging.getLogger("grok_sulfide.browser")
 
 CHROMIUM_SLIM_FLAGS = [
     "--disable-gpu",
@@ -120,7 +123,7 @@ def start_browser(log_callback=None):
             try:
                 TabPool.release_tab()
             except Exception:
-                pass
+                logger.debug("release_tab after start failure failed", exc_info=True)
             sleeper(min(1.5 * attempt, 4))
     raise Exception(f"浏览器启动失败，已重试4次: {last_exc}")
 
@@ -166,7 +169,7 @@ def sync_active_page():
             browser.new_tab()
         TabPool.sync_tab()
     except Exception:
-        pass
+        logger.debug("sync_active_page failed", exc_info=True)
     return get_page()
 
 

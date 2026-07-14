@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 import os
 import re
 import secrets
@@ -9,6 +11,8 @@ import time
 
 from . import runtime
 from .common import generate_username, pick_list_payload
+
+logger = logging.getLogger("grok_sulfide.providers")
 
 
 def _cfg():
@@ -215,7 +219,7 @@ def cloudmail_get_oai_code(
                     if log_callback:
                         log_callback("[Debug] CloudMail 公开 token 已刷新")
                 except Exception:
-                    pass
+                    logger.debug("suppressed exception", exc_info=True)
             sleep_with_cancel(current_interval, cancel_callback)
             continue
         if log_callback:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import json
 import mimetypes
 import os
@@ -23,6 +24,7 @@ from urllib.parse import parse_qs, urlparse
 
 
 ROOT = Path(__file__).resolve().parent
+logger = logging.getLogger("grok_sulfide.webui")
 WEB_ROOT = ROOT / "webui"
 CONFIG_FILE = ROOT / "config.json"
 CONFIG_EXAMPLE = ROOT / "config.example.json"
@@ -401,7 +403,7 @@ class ProcessManager:
                 os.killpg(process.pid, signal.SIGINT)
             process.wait(timeout=5)
         except Exception:
-            pass
+            logger.debug("suppressed exception", exc_info=True)
 
         if process.poll() is None:
             try:
@@ -419,7 +421,7 @@ class ProcessManager:
                 try:
                     process.kill()
                 except Exception:
-                    pass
+                    logger.debug("suppressed exception", exc_info=True)
 
         with self._lock:
             self._refresh_locked()
@@ -1028,7 +1030,7 @@ def main() -> int:
 
         logging_setup.init()
     except Exception:
-        pass
+        logger.debug("suppressed exception", exc_info=True)
 
     parser = argparse.ArgumentParser(description="Local WebUI for grok_sulfide")
     parser.add_argument("--host", default="127.0.0.1")

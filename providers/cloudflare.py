@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 import os
 import re
 import secrets
@@ -9,6 +11,8 @@ import time
 
 from . import runtime
 from .common import generate_username, pick_list_payload
+
+logger = logging.getLogger("grok_sulfide.providers")
 
 
 def _cfg():
@@ -118,7 +122,7 @@ def cloudflare_create_temp_address(api_base):
             if path.startswith("/admin/"):
                 payload["name"] = generate_username(10)
     except Exception:
-        pass
+        logger.debug("suppressed exception", exc_info=True)
     if path.startswith("/admin/") and not payload.get("domain"):
         raise Exception("Cloudflare 管理员创建邮箱需要在 defaultDomains 中配置可用域名")
     resp = http_post(

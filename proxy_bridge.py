@@ -3,11 +3,14 @@ from __future__ import annotations
 
 import atexit
 import base64
+import logging
 import select
 import socket
 import socketserver
 import threading
 from urllib.parse import unquote, urlparse
+
+logger = logging.getLogger("grok_sulfide.proxy_bridge")
 
 _proxy_bridge_cache: dict = {}
 _proxy_bridge_lock = threading.Lock()
@@ -64,7 +67,7 @@ def cleanup_proxy_bridges() -> None:
             server.shutdown()
             server.server_close()
         except Exception:
-            pass
+            logger.debug("proxy bridge cleanup failed", exc_info=True)
 
 
 atexit.register(cleanup_proxy_bridges)
@@ -80,7 +83,7 @@ def stop_authenticated_proxy_bridge(proxy_url: str) -> None:
         server.shutdown()
         server.server_close()
     except Exception:
-        pass
+        logger.debug("stop proxy bridge failed", exc_info=True)
 
 
 def start_authenticated_proxy_bridge(proxy_url: str) -> str:

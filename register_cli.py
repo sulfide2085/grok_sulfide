@@ -12,6 +12,8 @@ Browser lifecycle:
 """
 from __future__ import annotations
 
+import logging
+
 import argparse
 import os
 import queue
@@ -28,6 +30,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import grok_register_ttk as reg  # noqa: E402
 from failure_classify import FailureStats  # noqa: E402
 
+logger = logging.getLogger("grok_sulfide.cli")
 _failure_stats = FailureStats()
 
 
@@ -50,16 +53,16 @@ def _patched_create_browser_options(*args, **kwargs):
             try:
                 opts.set_argument(flag)
             except Exception:
-                pass
+                logger.debug("suppressed exception", exc_info=True)
 
     try:
         opts.auto_port()
     except Exception:
-        pass
+        logger.debug("suppressed exception", exc_info=True)
     try:
         opts.set_timeouts(base=1)
     except Exception:
-        pass
+        logger.debug("suppressed exception", exc_info=True)
 
     for cand in (
         "/usr/bin/chromium",
@@ -71,7 +74,7 @@ def _patched_create_browser_options(*args, **kwargs):
             try:
                 opts.set_browser_path(cand)
             except Exception:
-                pass
+                logger.debug("suppressed exception", exc_info=True)
             break
 
     ext_path = os.path.join(os.path.dirname(os.path.abspath(reg.__file__)), "turnstilePatch")
@@ -79,7 +82,7 @@ def _patched_create_browser_options(*args, **kwargs):
         try:
             opts.add_extension(ext_path)
         except Exception:
-            pass
+            logger.debug("suppressed exception", exc_info=True)
     return opts
 
 
@@ -183,7 +186,7 @@ def _ensure_browser(worker_id: int, force_recycle: bool = False):
         try:
             reg.stop_browser()
         except Exception:
-            pass
+            logger.debug("suppressed exception", exc_info=True)
     if reg.TabPool.get_browser() is None:
         reg.start_browser(log_callback=lambda m: log(worker_id, m))
 
@@ -210,7 +213,7 @@ def register_one(
         try:
             reg.stop_browser()
         except Exception:
-            pass
+            logger.debug("suppressed exception", exc_info=True)
         proxy_account = reg.begin_registration_proxy_session(f"w{worker_id}_n{idx}")
         if proxy_account:
             log(worker_id, f"[*] Resin 粘性会话: {proxy_account}")
@@ -267,7 +270,7 @@ def register_one(
                 try:
                     reg.mark_error(bad, reason=reason)
                 except Exception:
-                    pass
+                    logger.debug("suppressed exception", exc_info=True)
                 log(
                     worker_id,
                     f"! xAI {'已存在账户' if is_existing else '验证码发送过多/限流'}，已标记并换号: {bad}",
@@ -276,7 +279,7 @@ def register_one(
                     try:
                         reg.restart_browser(log_callback=lambda m: log(worker_id, m))
                     except Exception:
-                        pass
+                        logger.debug("suppressed exception", exc_info=True)
                     reg.sleep_with_cancel(1, cancel)
                     continue
             msg_l = msg.lower()
@@ -316,7 +319,7 @@ def register_one(
                             ),
                         )
                     except Exception:
-                        pass
+                        logger.debug("suppressed exception", exc_info=True)
                     log(
                         worker_id,
                         f"! 邮箱读信失败，标记后换号"
@@ -330,7 +333,7 @@ def register_one(
                 try:
                     reg.restart_browser(log_callback=lambda m: log(worker_id, m))
                 except Exception:
-                    pass
+                    logger.debug("suppressed exception", exc_info=True)
                 reg.sleep_with_cancel(1, cancel)
                 continue
             log(worker_id, f"! 邮箱阶段失败: {msg}")
@@ -340,11 +343,11 @@ def register_one(
                 if email:
                     reg.mark_error(email, reason=msg[:120])
             except Exception:
-                pass
+                logger.debug("suppressed exception", exc_info=True)
             try:
                 reg.restart_browser(log_callback=lambda m: log(worker_id, m))
             except Exception:
-                pass
+                logger.debug("suppressed exception", exc_info=True)
             return None
 
     try:
@@ -380,7 +383,7 @@ def register_one(
             try:
                 reg.save_cookies_snapshot(page, "success", email)
             except Exception:
-                pass
+                logger.debug("suppressed exception", exc_info=True)
         try:
             reg.add_token_to_grok2api_pools(
                 sso, email=email, log_callback=lambda m: log(worker_id, m)
@@ -395,7 +398,7 @@ def register_one(
             try:
                 reg.stop_browser()
             except Exception:
-                pass
+                logger.debug("suppressed exception", exc_info=True)
 
         job = {
             "email": email,
@@ -430,7 +433,7 @@ def register_one(
         try:
             reg.restart_browser(log_callback=lambda m: log(worker_id, m))
         except Exception:
-            pass
+            logger.debug("suppressed exception", exc_info=True)
         return None
 
 
@@ -516,7 +519,7 @@ def _register_worker(
                     try:
                         reg.restart_browser(log_callback=lambda m: log(worker_id, m))
                     except Exception:
-                        pass
+                        logger.debug("suppressed exception", exc_info=True)
             except Exception:
                 retry += 1
                 if retry < 2:
@@ -525,7 +528,7 @@ def _register_worker(
                     try:
                         reg.restart_browser(log_callback=lambda m: log(worker_id, m))
                     except Exception:
-                        pass
+                        logger.debug("suppressed exception", exc_info=True)
 
         if retry >= 2:
             # register_one already counted fail on exception path; if both returned None, count once more only if needed
@@ -535,7 +538,7 @@ def _register_worker(
     try:
         reg.stop_browser()
     except Exception:
-        pass
+        logger.debug("suppressed exception", exc_info=True)
     log(worker_id, "register worker exit")
 
 
@@ -555,7 +558,7 @@ def _mint_worker(worker_id: str, mint_queue: queue.Queue, config: dict):
 
         shutdown_mint_browsers()
     except Exception:
-        pass
+        logger.debug("suppressed exception", exc_info=True)
     log(worker_id, "mint worker exit")
 
 
@@ -641,7 +644,7 @@ def main() -> int:
 
         logging_setup.init()
     except Exception:
-        pass
+        logger.debug("suppressed exception", exc_info=True)
     parser = argparse.ArgumentParser(description="CLI runner for grok_register_ttk (pipelined).")
     parser.add_argument("--count", type=int, default=1, help="账号总数目标（0=不限；含已有）")
     parser.add_argument(
@@ -846,7 +849,7 @@ def main() -> int:
     try:
         reg.shutdown_browser()
     except Exception:
-        pass
+        logger.debug("suppressed exception", exc_info=True)
 
     # stop side-effect pool
     try:
@@ -854,7 +857,7 @@ def main() -> int:
         if pool is not None:
             pool.shutdown(wait=False, cancel_futures=True)
     except Exception:
-        pass
+        logger.debug("suppressed exception", exc_info=True)
 
     _log_queue.put(None)
     log_thread.join(timeout=2)

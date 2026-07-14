@@ -6,8 +6,11 @@ runtime config.json path and accidental `import config` shadowing.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from typing import Any
+
+logger = logging.getLogger("grok_sulfide.config")
 
 _ROOT = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(_ROOT, "config.json")
@@ -127,7 +130,7 @@ def load_env(env_path: str | None = None) -> None:
                 if key and key not in os.environ:
                     os.environ[key] = val
     except Exception:
-        pass
+        logger.debug("load_env failed for %s", path, exc_info=True)
 
 
 def validate_config(cfg: dict[str, Any], *, strict: bool = False) -> dict[str, Any]:
