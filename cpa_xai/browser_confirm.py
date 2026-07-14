@@ -22,6 +22,10 @@ Hard rules:
 
 from __future__ import annotations
 
+logger = logging.getLogger("grok_sulfide.cpa.browser_confirm")
+
+import logging
+
 import os
 import re
 import sys
@@ -113,7 +117,7 @@ def create_standalone_page(
         try:
             opts.headless(False)
         except Exception:
-            pass
+            logger.debug("suppressed exception", exc_info=True)
         log(f"headed browser DISPLAY={os.environ.get('DISPLAY', '')!r}")
 
     for cand in (
@@ -126,7 +130,7 @@ def create_standalone_page(
             try:
                 opts.set_browser_path(cand)
             except Exception:
-                pass
+                logger.debug("suppressed exception", exc_info=True)
             break
 
     from .proxyutil import proxy_for_chromium, proxy_log_label, resolve_proxy
@@ -150,7 +154,7 @@ def close_standalone(browser: Any) -> None:
     try:
         browser.quit()
     except Exception:
-        pass
+        logger.debug("suppressed exception", exc_info=True)
 
 
 # ── mint browser reuse (per-thread) ──
@@ -173,7 +177,7 @@ def clear_page_session(page: Any, browser: Any | None = None, log: LogFn | None 
             try:
                 page.get("about:blank")
             except Exception:
-                pass
+                logger.debug("suppressed exception", exc_info=True)
             for js in (
                 "try{localStorage.clear()}catch(e){}",
                 "try{sessionStorage.clear()}catch(e){}",
@@ -181,7 +185,7 @@ def clear_page_session(page: Any, browser: Any | None = None, log: LogFn | None 
                 try:
                     page.run_js(js)
                 except Exception:
-                    pass
+                    logger.debug("suppressed exception", exc_info=True)
         for target in (page, browser):
             if target is None:
                 continue
@@ -198,9 +202,9 @@ def clear_page_session(page: Any, browser: Any | None = None, log: LogFn | None 
                             try:
                                 target.set.cookies.remove(c)  # type: ignore[attr-defined]
                             except Exception:
-                                pass
+                                logger.debug("suppressed exception", exc_info=True)
                 except Exception:
-                    pass
+                    logger.debug("suppressed exception", exc_info=True)
     except Exception as e:
         log(f"clear_page_session: {e}")
 
@@ -374,7 +378,7 @@ def acquire_mint_browser(
         try:
             close_standalone(st.get("browser"))
         except Exception:
-            pass
+            logger.debug("suppressed exception", exc_info=True)
         st["browser"] = None
         st["page"] = None
         st["served"] = 0
@@ -450,7 +454,7 @@ def _visible_text(page: Any) -> str:
         if isinstance(t, str) and t.strip():
             return t
     except Exception:
-        pass
+        logger.debug("suppressed exception", exc_info=True)
     try:
         raw = getattr(page, "raw_text", None)
         if callable(raw):
@@ -460,7 +464,7 @@ def _visible_text(page: Any) -> str:
         if isinstance(raw, str) and raw.strip():
             return raw
     except Exception:
-        pass
+        logger.debug("suppressed exception", exc_info=True)
     return ""
 
 
@@ -477,7 +481,7 @@ def _find_button_exact(page: Any, label: str) -> Any | None:
             except Exception:
                 continue
     except Exception:
-        pass
+        logger.debug("suppressed exception", exc_info=True)
     try:
         return page.ele(f"xpath://button[normalize-space(.)='{label}']", timeout=0.3)
     except Exception:
@@ -571,7 +575,7 @@ def _click_exact(
                 try:
                     el.scroll.to_see()
                 except Exception:
-                    pass
+                    logger.debug("suppressed exception", exc_info=True)
                 el.click()
                 log(f"clicked REAL exact {label!r}")
             else:
@@ -632,7 +636,7 @@ def _wait_turnstile(page: Any, log: LogFn, timeout: float = 45.0) -> bool:
                     log(f"turnstile ready len={len(v)}")
                     return True
         except Exception:
-            pass
+            logger.debug("suppressed exception", exc_info=True)
 
         # Mimic register-machine: shadow-root checkbox click
         try:
@@ -657,7 +661,7 @@ Object.defineProperty(MouseEvent.prototype, 'screenY', { value: sy });
                             """
                         )
                     except Exception:
-                        pass
+                        logger.debug("suppressed exception", exc_info=True)
                     try:
                         body_sr = iframe.ele("tag:body").shadow_root
                         btn = body_sr.ele("tag:input")
@@ -667,9 +671,9 @@ Object.defineProperty(MouseEvent.prototype, 'screenY', { value: sy });
                                 log("clicked turnstile shadow checkbox")
                                 clicked = True
                     except Exception:
-                        pass
+                        logger.debug("suppressed exception", exc_info=True)
         except Exception:
-            pass
+            logger.debug("suppressed exception", exc_info=True)
 
         if not clicked:
             try:
@@ -685,7 +689,7 @@ if (nodes.length && typeof nodes[0].click === 'function') nodes[0].click();
                 clicked = True
                 log("clicked turnstile container via JS")
             except Exception:
-                pass
+                logger.debug("suppressed exception", exc_info=True)
         _sleep(0.9)
     log("turnstile not ready")
     return False
@@ -809,7 +813,7 @@ def approve_device_code(
                         uc.input(user_code)
                         log("filled user_code")
                 except Exception:
-                    pass
+                    logger.debug("suppressed exception", exc_info=True)
             if _click_exact(page, ["继续", "Continue"], log, real=False):
                 _sleep(2.0)
                 continue
@@ -821,7 +825,7 @@ def approve_device_code(
                     _sleep(2.0)
                     continue
             except Exception:
-                pass
+                logger.debug("suppressed exception", exc_info=True)
 
         # Account redirect
         if "正在重定向" in text or ("/account" in url and "sign-in" not in url):

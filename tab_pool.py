@@ -16,8 +16,11 @@ Notes:
 
 from __future__ import annotations
 
+import logging
 import threading
 from typing import Any
+
+logger = logging.getLogger("grok_sulfide.tab_pool")
 
 
 class TabPool:
@@ -65,7 +68,7 @@ class TabPool:
             try:
                 cls._all_browsers = [b for b in cls._all_browsers if b is not browser]
             except Exception:
-                pass
+                logger.debug("suppressed exception", exc_info=True)
 
     @classmethod
     def get_tab(cls, url=None):
@@ -112,7 +115,7 @@ class TabPool:
                 try:
                     tab.get("about:blank")
                 except Exception:
-                    pass
+                    logger.debug("suppressed exception", exc_info=True)
                 for js in (
                     "try{localStorage.clear()}catch(e){}",
                     "try{sessionStorage.clear()}catch(e){}",
@@ -121,7 +124,7 @@ class TabPool:
                     try:
                         tab.run_js(js)
                     except Exception:
-                        pass
+                        logger.debug("suppressed exception", exc_info=True)
             # Best-effort cookie wipe (API varies by DrissionPage version)
             cleared = False
             for target in (tab, browser):
@@ -150,7 +153,7 @@ class TabPool:
                             try:
                                 browser.set.cookies.remove(c)  # type: ignore[attr-defined]
                             except Exception:
-                                pass
+                                logger.debug("suppressed exception", exc_info=True)
                 except Exception:
                     ok = False
             # Prefer a single clean tab
@@ -162,7 +165,7 @@ class TabPool:
                         try:
                             browser.get_tab(tid).close()
                         except Exception:
-                            pass
+                            logger.debug("suppressed exception", exc_info=True)
                     cls._thread_local.tab = browser.get_tab(keep)
                 elif tabs:
                     cls._thread_local.tab = browser.get_tab(tabs[0])
@@ -198,9 +201,9 @@ class TabPool:
                 try:
                     browser.quit()
                 except Exception:
-                    pass
+                    logger.debug("suppressed exception", exc_info=True)
             except Exception:
-                pass
+                logger.debug("suppressed exception", exc_info=True)
             cls._unregister(browser)
         cls._thread_local.browser = None
         cls._thread_local.tab = None
@@ -226,9 +229,9 @@ class TabPool:
                 try:
                     b.quit()
                 except Exception:
-                    pass
+                    logger.debug("suppressed exception", exc_info=True)
             except Exception:
-                pass
+                logger.debug("suppressed exception", exc_info=True)
 
     @classmethod
     def live_count(cls) -> int:

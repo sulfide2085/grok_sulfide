@@ -7,6 +7,10 @@ registrar project or duplicating the browser registration flow.
 
 from __future__ import annotations
 
+logger = logging.getLogger("grok_sulfide.hotmail")
+
+import logging
+
 import email
 import html
 import imaplib
@@ -494,7 +498,7 @@ def _imap_get_code(
                     if int(sent_at.timestamp() * 1000) < cutoff_ms:
                         continue
                 except Exception:
-                    pass
+                    logger.debug("suppressed exception", exc_info=True)
             subject = _decode_header(message.get("Subject", ""))
             sender = _decode_header(message.get("From", ""))
             recipients = " ".join(
@@ -523,11 +527,11 @@ def _imap_get_code(
         try:
             client.close()
         except Exception:
-            pass
+            logger.debug("suppressed exception", exc_info=True)
         try:
             client.logout()
         except Exception:
-            pass
+            logger.debug("suppressed exception", exc_info=True)
 
 
 def hotmail_get_oai_code(

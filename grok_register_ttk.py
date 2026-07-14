@@ -64,7 +64,6 @@ from config_runtime import (
     CONFIG_FILE,
     DEFAULT_CONFIG,
     ConfigError,
-    load_env,
     load_config as _load_config_impl,
     save_config as _save_config_impl,
     normalize_runtime_config as _normalize_runtime_config,

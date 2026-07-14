@@ -102,10 +102,6 @@ def get_message_detail(token, message_id):
     resp.raise_for_status()
     return resp.json()
 
-def generate_username(length=10):
-    chars = string.ascii_lowercase + string.digits
-    return "".join(secrets.choice(chars) for _ in range(length))
-
 
 def pick_domain(api_key=None):
     domains = get_domains(api_key=api_key)

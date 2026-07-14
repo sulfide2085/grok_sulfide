@@ -4,6 +4,10 @@
 
 from __future__ import annotations
 
+logger = logging.getLogger("grok_sulfide.gui")
+
+import logging
+
 import datetime
 import os
 import queue
@@ -369,7 +373,7 @@ class GrokRegisterGUI:
             try:
                 win.destroy()
             except Exception:
-                pass
+                logger.debug("suppressed exception", exc_info=True)
 
         close_btn = ttk.Button(footer, text="关闭", command=on_close)
         close_btn.pack(side=tk.RIGHT, padx=5)
@@ -485,7 +489,7 @@ class GrokRegisterGUI:
         try:
             reg.stop_browser()
         except Exception:
-            pass
+            logger.debug("suppressed exception", exc_info=True)
         proxy_account = reg.begin_registration_proxy_session(f"gui_n{idx}")
         if proxy_account:
             logf(f"[*] Resin 粘性会话: {proxy_account}")
@@ -656,7 +660,7 @@ class GrokRegisterGUI:
                     try:
                         reg.stop_browser()
                     except Exception:
-                        pass
+                        logger.debug("suppressed exception", exc_info=True)
                     if self.should_stop():
                         break
                     reg.sleep_with_cancel(1, self.should_stop)
@@ -666,7 +670,7 @@ class GrokRegisterGUI:
             try:
                 reg.stop_browser()
             except Exception:
-                pass
+                logger.debug("suppressed exception", exc_info=True)
 
     def run_registration(self, count, worker_count):
         task_queue = queue.Queue()
