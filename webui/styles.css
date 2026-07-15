@@ -120,6 +120,13 @@ select:focus-visible {
   gap: 8px;
 }
 
+.draft-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
 .meta-state {
   color: var(--muted);
   font-size: 12px;

@@ -31,6 +31,7 @@ from webui_service import (
     outlook_inventory,
     public_config,
     resolve_preset_values,
+    resolve_static_path,
     save_config,
 )
 
@@ -113,8 +114,9 @@ class WebUIHandler(BaseHTTPRequestHandler):
             self._send_error_json(HTTPStatus.FORBIDDEN, reason)
             return
         try:
-            if parsed.path in STATIC_ROUTES:
-                self._serve_static(STATIC_ROUTES[parsed.path])
+            static_path = resolve_static_path(parsed.path)
+            if static_path is not None:
+                self._serve_static(static_path)
                 return
             if parsed.path == "/api/status":
                 self._send_json({"ok": True, "data": dashboard_status()})

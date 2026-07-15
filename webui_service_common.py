@@ -46,9 +46,31 @@ _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "[::1]"})
 STATIC_ROUTES = {
     "/": WEB_ROOT / "index.html",
     "/index.html": WEB_ROOT / "index.html",
-    "/assets/app.js": WEB_ROOT / "app.js",
     "/assets/styles.css": WEB_ROOT / "styles.css",
+    # Modular ES entry (imports resolve under /assets/js/*).
+    "/assets/js/app.js": WEB_ROOT / "js" / "app.js",
 }
+
+
+def resolve_static_path(url_path: str) -> Path | None:
+    """Map a URL path to a file under WEB_ROOT (exact routes + /assets/*)."""
+    exact = STATIC_ROUTES.get(url_path)
+    if exact is not None:
+        return exact
+    if not url_path.startswith("/assets/"):
+        return None
+    rel = url_path[len("/assets/") :].lstrip("/")
+    if not rel or ".." in Path(rel).parts:
+        return None
+    root = WEB_ROOT.resolve()
+    candidate = (WEB_ROOT / rel).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError:
+        return None
+    if candidate.is_file():
+        return candidate
+    return None
 
 EDITABLE_CONFIG = {
     "registration_method": "choice",

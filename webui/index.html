@@ -142,6 +142,10 @@
               <button id="startButton" class="button primary" type="submit">启动任务</button>
               <button id="stopButton" class="button danger" type="button" disabled>停止</button>
             </div>
+            <div class="secondary-actions draft-actions">
+              <button id="rememberDraftButton" class="text-button" type="button">记住当前运行设置</button>
+              <button id="clearDraftButton" class="text-button" type="button">清除记住的设置</button>
+            </div>
           </form>
         </section>
 
@@ -178,6 +182,7 @@
               <span>邮箱提供器</span>
               <select id="emailProviderConfig">
                 <option value="outlook">Outlook / Hotmail</option>
+                <option value="tempmail">Tempmail.lol</option>
                 <option value="moemail">MoeMail</option>
                 <option value="duckmail">DuckMail</option>
                 <option value="yyds">YYDS</option>
@@ -191,6 +196,13 @@
                 <span>Outlook 凭据文件</span>
                 <input id="mailFileConfig" type="text" spellcheck="false" />
               </label>
+            </div>
+
+            <div class="provider-fields provider-tempmail-fields">
+              <label class="field"><span>Tempmail API Key</span><input id="tempmailKeyConfig" type="password" autocomplete="new-password" /></label>
+              <label class="field"><span>Tempmail 前缀</span><input id="tempmailPrefixConfig" type="text" placeholder="grok" spellcheck="false" /></label>
+              <label class="field"><span>Tempmail API 地址</span><input id="tempmailBaseConfig" type="url" placeholder="https://api.tempmail.lol" spellcheck="false" /></label>
+              <label class="field"><span>Tempmail 代理（可选）</span><input id="tempmailProxyConfig" type="text" placeholder="留空继承注册代理" spellcheck="false" /></label>
             </div>
 
             <div class="provider-fields provider-moemail-fields">
@@ -365,6 +377,6 @@
     </main>
 
     <div id="toastRegion" class="toast-region" aria-live="polite"></div>
-    <script src="/assets/app.js" defer></script>
+    <script type="module" src="/assets/js/app.js"></script>
   </body>
 </html>
