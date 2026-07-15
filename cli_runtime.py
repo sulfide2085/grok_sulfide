@@ -13,9 +13,8 @@ Browser lifecycle:
 """
 from __future__ import annotations
 
-import logging
-
 import argparse
+import logging
 import os
 import queue
 import sys
