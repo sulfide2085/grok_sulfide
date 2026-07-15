@@ -112,7 +112,13 @@ def _as_bool(value: Any, default: bool = False) -> bool:
 
 def _resolve_path(value: Any, default_name: str = "mail_credentials.txt") -> str:
     raw = str(value or default_name).strip() or default_name
-    return raw if os.path.isabs(raw) else os.path.join(_project_dir, raw)
+    if os.path.isabs(raw):
+        return raw
+    # Prefer CWD (worktree/runtime), then package dir.
+    cwd_path = os.path.join(os.getcwd(), raw)
+    if os.path.exists(cwd_path):
+        return cwd_path
+    return os.path.join(_project_dir, raw)
 
 
 def get_hotmail_accounts_file() -> str:
@@ -191,9 +197,22 @@ def _is_alias_of(email_address: str, main_email: str) -> bool:
 
 
 def _tracked_emails() -> set[str]:
+    """Prefer store ledger (worktree-aware); fall back to local text files."""
     result = set(_reserved_aliases)
+    try:
+        import store as _store
+
+        # collect_local_consumed_emails includes used/error/accounts/cpa
+        result |= {str(x).strip().lower() for x in _store.collect_local_consumed_emails(config)}
+        return result
+    except Exception:
+        pass
     for name in ("emails_used.txt", "emails_error.txt"):
         path = os.path.join(_project_dir, name)
+        if not os.path.exists(path):
+            # also try cwd for worktree runs
+            alt = os.path.join(os.getcwd(), name)
+            path = alt if os.path.exists(alt) else path
         if not os.path.exists(path):
             continue
         try:
@@ -266,20 +285,27 @@ def hotmail_get_email_and_token() -> tuple[str, str]:
             candidate = None
             if alias_mode in {"primary", "main", "bare"}:
                 candidate = main_email if _available(main_email) else None
-            elif _consumed_alias_count(main_email) >= alias_limit:
-                continue
-            elif random_mode:
-                for _ in range(random_attempts):
-                    alias = _make_alias(main_email, 1, randomize=True)
-                    if _available(alias):
-                        candidate = alias
-                        break
             else:
-                for index in range(1, alias_limit + 1):
-                    alias = _make_alias(main_email, index)
-                    if _available(alias):
-                        candidate = alias
-                        break
+                # Prefer unused primary first, then free aliases under limit.
+                # Count only real +aliases; do not let CPA/account noise block selection.
+                if _available(main_email):
+                    candidate = main_email
+                else:
+                    used_aliases = _consumed_alias_count(main_email)
+                    if used_aliases >= alias_limit:
+                        continue
+                    if random_mode:
+                        for _ in range(random_attempts):
+                            alias = _make_alias(main_email, 1, randomize=True)
+                            if _available(alias):
+                                candidate = alias
+                                break
+                    else:
+                        for index in range(1, alias_limit + 1):
+                            alias = _make_alias(main_email, index)
+                            if _available(alias):
+                                candidate = alias
+                                break
             if candidate is None:
                 continue
             _reserved_aliases.add(candidate.lower())
