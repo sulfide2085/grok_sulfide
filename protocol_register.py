@@ -201,8 +201,11 @@ def create_email_receiver(config: dict) -> tuple[str, Any]:
         "outlook": "hotmail",
         "outlookmail": "hotmail",
         "microsoft": "hotmail",
+        "tempmail.lol": "tempmail",
+        "lol": "tempmail",
+        "tempmail_lol": "tempmail",
     }.get(provider, provider)
-    supported = {"hotmail", "duckmail", "yyds", "cloudflare", "cloudmail"}
+    supported = {"hotmail", "duckmail", "yyds", "cloudflare", "cloudmail", "tempmail"}
     if provider not in supported:
         raise ValueError(f"unsupported protocol_email_provider: {provider}")
     import grok_register_ttk as registrar

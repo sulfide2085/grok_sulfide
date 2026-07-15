@@ -100,7 +100,13 @@ def _log_writer():
         msg = _log_queue.get()
         if msg is None:
             break
-        print(msg, flush=True)
+        try:
+            print(msg, flush=True)
+        except UnicodeEncodeError:
+            # Windows consoles may be GBK; drop unencodable glyphs instead of killing the worker.
+            enc = getattr(getattr(sys.stdout, "encoding", None), "lower", lambda: "")() or "utf-8"
+            safe = str(msg).encode(enc, errors="replace").decode(enc, errors="replace")
+            print(safe, flush=True)
 
 
 def log(worker_id: int | str, msg: str) -> None:

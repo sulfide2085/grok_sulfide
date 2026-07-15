@@ -4,11 +4,19 @@ from .cloudflare import CloudflareProvider
 from .cloudmail import CloudMailProvider
 from .duckmail import DuckMailProvider
 from .hotmail import HotmailProvider
+from .tempmail import TempmailProvider
 from .yyds import YydsProvider
 from . import runtime
 
 _REGISTRY: dict[str, type] = {}
-for cls in (DuckMailProvider, CloudflareProvider, YydsProvider, CloudMailProvider, HotmailProvider):
+for cls in (
+    DuckMailProvider,
+    CloudflareProvider,
+    YydsProvider,
+    CloudMailProvider,
+    HotmailProvider,
+    TempmailProvider,
+):
     for alias in cls.aliases:
         _REGISTRY[alias] = cls
 
@@ -31,4 +39,5 @@ __all__ = [
     "YydsProvider",
     "CloudMailProvider",
     "HotmailProvider",
+    "TempmailProvider",
 ]

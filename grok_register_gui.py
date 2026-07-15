@@ -49,7 +49,7 @@ class GrokRegisterGUI:
         self.email_provider_combo = ttk.Combobox(
             config_frame,
             textvariable=self.email_provider_var,
-            values=["hotmail", "duckmail", "yyds", "cloudflare", "cloudmail"],
+            values=["hotmail", "duckmail", "tempmail", "yyds", "cloudflare", "cloudmail"],
             width=12,
             state="readonly",
         )

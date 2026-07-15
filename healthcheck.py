@@ -64,18 +64,23 @@ def check_signup_reachable(
 
 def check_mail_config(config: dict[str, Any]) -> dict[str, Any]:
     """Validate mail-related config without opening network sockets when possible."""
+    import os
+    from pathlib import Path
+
     method = str(config.get("registration_method") or "browser").strip().lower()
     if method == "protocol":
         provider = str(config.get("protocol_email_provider") or "outlook").strip().lower()
         if provider == "moemail" and not str(config.get("protocol_moemail_api_key") or "").strip():
             raise HealthCheckError("protocol_moemail_api_key is required for protocol/moemail")
+        if provider in {"tempmail", "tempmail.lol", "lol", "tempmail_lol"}:
+            key = str(config.get("tempmail_api_key") or os.environ.get("TEMPMAIL_API_KEY") or "").strip()
+            if not key:
+                raise HealthCheckError("tempmail_api_key / TEMPMAIL_API_KEY is required for protocol/tempmail")
         return {"ok": True, "mode": "protocol", "provider": provider}
 
     provider = str(config.get("email_provider") or "hotmail").strip().lower()
     if provider in {"hotmail", "outlook", "outlookmail", "microsoft"}:
         path = str(config.get("hotmail_accounts_file") or "mail_credentials.txt")
-        from pathlib import Path
-
         p = Path(path)
         if not p.is_absolute():
             p = Path.cwd() / p
@@ -88,6 +93,10 @@ def check_mail_config(config: dict[str, Any]) -> dict[str, Any]:
     elif provider == "duckmail" and not str(config.get("duckmail_api_key") or "").strip():
         # duckmail may work without key on public instances; warn only
         logger.warning("duckmail_api_key is empty; public instance may rate-limit")
+    elif provider in {"tempmail", "tempmail.lol", "lol", "tempmail_lol"}:
+        key = str(config.get("tempmail_api_key") or os.environ.get("TEMPMAIL_API_KEY") or "").strip()
+        if not key:
+            raise HealthCheckError("tempmail_api_key / TEMPMAIL_API_KEY is required")
     return {"ok": True, "mode": "browser", "provider": provider}
 
 
