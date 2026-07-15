@@ -280,7 +280,7 @@ function renderPresetOptions(config) {
   }
 }
 
-function updateRunPreset({ keepDraft = true } = {}) {
+function updateRunPreset({ keepDraft = true, persistDraft = true } = {}) {
   const preset = getPreset($("runPresetInput")?.value);
   if (!preset) return;
   const method = preset.values.registration_method === "protocol" ? "协议" : "浏览器";
@@ -310,7 +310,8 @@ function updateRunPreset({ keepDraft = true } = {}) {
   }
   updateAliasControls();
   renderReadiness(state.status || {});
-  saveRunDraft(true);
+  // Clearing remembered settings must not immediately rewrite localStorage.
+  if (persistDraft) saveRunDraft(true);
 }
 
 function updateAliasControls() {
@@ -620,7 +621,7 @@ function bindEvents() {
   $("clearDraftButton")?.addEventListener("click", () => {
     clearRunDraft();
     state.draftApplied = false;
-    updateRunPreset({ keepDraft: false });
+    updateRunPreset({ keepDraft: false, persistDraft: false });
   });
   document.querySelectorAll(".tab-button").forEach((button) => {
     button.addEventListener("click", () => switchTab(button.dataset.tab));
